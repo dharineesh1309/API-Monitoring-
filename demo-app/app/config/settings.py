@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,7 +65,16 @@ class Settings(BaseSettings):
     lambda_function: str = "centralwatch-image-processor"
 
     # --- OpenTelemetry ----------------------------------------------------
-    otel_exporter_endpoint: str = "http://otel-collector:4318"
+    # OTEL_EXPORTER_OTLP_ENDPOINT is the standard OpenTelemetry variable and
+    # the name documented in .env.example/docker-compose.yml. Keep accepting
+    # the older project-specific name so existing local setups still work.
+    otel_exporter_endpoint: str = Field(
+        default="http://otel-collector:4318",
+        validation_alias=AliasChoices(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_ENDPOINT",
+        ),
+    )
     otel_metrics_export_interval_ms: int = 15000
 
     # --- Auth --------------------------------------------------------------
@@ -93,6 +102,9 @@ class Settings(BaseSettings):
     localstack_wait_timeout_seconds: int = 120
     simulate_timeout_seconds: float = 5.0
     simulate_retry_attempts: int = 3
+    # Scanning is always read-only. Applying fixes also requires this gate and
+    # an explicit confirmation in the remediation request.
+    aws_security_agent_allow_remediation: bool = False
 
 
 @lru_cache

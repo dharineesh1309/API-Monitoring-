@@ -11,14 +11,14 @@ from contextlib import asynccontextmanager
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from centralwatch_security import SecurityEnforcementMiddleware, security_router
+from centralwatch_security import SecurityEnforcementMiddleware, proxy_router, security_router
 
 from .config.settings import get_settings
-from .routes import auth, files, images, notifications, orders, queue, simulate
+from .routes import auth, chat, files, images, notifications, orders, queue, security_agent, simulate
 from .routes.simulate import SimulatedAWSError, SimulatedFailure
 from .services import Container
 from .deps import require_auth
@@ -268,7 +268,18 @@ def create_app() -> FastAPI:
     app.include_router(queue.router)
     app.include_router(images.router)
     app.include_router(simulate.router)
+    app.include_router(security_agent.router)
+    app.include_router(chat.router)
+    # Proxy execution and demo key management use their own IP allowlists and
+    # intentionally match the documented no-CentralWatch-token workflow.
+    app.include_router(proxy_router, prefix="/centralwatch")
+    # Security scanning remains protected by the application's bearer token.
     app.include_router(security_router, prefix="/centralwatch", dependencies=[Depends(require_auth)])
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        """Give browser users a useful landing page instead of a bare 404."""
+        return RedirectResponse(url="/docs", status_code=307)
 
     @app.get("/healthz", tags=["health"])
     async def healthz(request: Request):
@@ -283,8 +294,17 @@ def create_app() -> FastAPI:
     async def readyz(request: Request):
         container: Container = request.app.state.container
         try:
+            proxy_store = getattr(request.app.state, "centralwatch_proxy_store", None)
+            if proxy_store is None:
+                raise RuntimeError("Proxy configuration database is not initialized")
+            await proxy_store.ping()
             buckets = await asyncio.to_thread(container.s3.list_buckets)
-            return {"status": "ready", "aws": "reachable", "buckets": len(buckets)}
+            return {
+                "status": "ready",
+                "aws": "reachable",
+                "proxy_database": "reachable",
+                "buckets": len(buckets),
+            }
         except Exception as exc:  # noqa: BLE001
             logger.warning("Readiness check failed: %s", exc)
             return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(exc)})
