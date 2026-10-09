@@ -90,7 +90,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (event_type) (increase(centralwatch_security_violations_total[5m]))",
+          "expr": "sum by (event_type) (increase(centralwatch_centralwatch_security_violations_total[5m]))",
           "legendFormat": "{{event_type}}",
           "range": true,
           "refId": "A"
@@ -112,7 +112,7 @@
       },
       "id": 2,
       "options": {
-        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h2>\ud83d\udee1\ufe0f On-Demand OWASP Security Scan</h2>\n  <p>Run a background ASTF scan against the API.</p>\n  <br/>\n  <a href=\"http://localhost:8000/centralwatch/security-scan?target_url=http://127.0.0.1:8000\" target=\"_blank\" style=\"padding: 10px 20px; background-color: #3274D9; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;\">Trigger Scan</a>\n  <br/><br/>\n  <p><i>Note: Requires valid admin token in request context. Use CLI/cURL for authenticated triggers if needed.</i></p>\n</div>",
+        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h2>\ud83d\udee1\ufe0f On-Demand OWASP Security Scan</h2>\n  <p>Run an authenticated ASTF scan and open the generated HTML report from CentralWatch.</p>\n  <br/>\n  <a href=\"http://127.0.0.1:8080/#security-scan\" target=\"_top\" style=\"padding: 10px 20px; background-color: #3274D9; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;\">Open Scan Control</a>\n  <br/><br/>\n  <p><i>The unified dashboard handles operator authentication and submits the required POST request.</i></p>\n</div>",
         "mode": "html"
       },
       "title": "Threat Scanner Control Panel",
@@ -146,8 +146,8 @@
             "type": "loki",
             "uid": "loki"
           },
-          "editorMode": "builder",
-          "expr": "{service_name=\"centralwatch-demo-app\"} |= `\"security_event\"`",
+          "editorMode": "code",
+          "expr": "{job=\"centralwatch-demo-app\"} |= `\"security_event\"` | json message=\"body\", severity, security_event=\"attributes.security_event\", user_id=\"attributes.user_id\", client_ip=\"attributes.client_ip\", action=\"attributes.action\", status_code=\"attributes.status_code\"",
           "queryType": "range",
           "refId": "A"
         }
@@ -156,7 +156,7 @@
       "type": "logs"
     }
   ],
-  "refresh": "5s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": [

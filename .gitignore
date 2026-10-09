@@ -295,6 +295,12 @@ lambda-build/
 frontend/coverage/
 frontend/.eslintcache
 
+# This project intentionally ships the dependency-free proxy dashboard build.
+!frontend/dist/
+!frontend/dist/index.html
+!frontend/dist/styles.css
+!frontend/dist/app.js
+
 # ------------------------------------------------------------
 
 # Generated backend artifacts

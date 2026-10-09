@@ -14,6 +14,31 @@
 # ============================================================
 
 services:
+  # CentralWatch-owned PostgreSQL storage for proxy services and roles.
+  # API keys are encrypted by the application before they are written.
+  proxy-db:
+    image: postgres:16-alpine
+    container_name: centralwatch-proxy-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=centralwatch
+      - POSTGRES_USER=centralwatch
+      # DEV-ONLY default. Shared/production environments must override it.
+      - POSTGRES_PASSWORD=${PROXY_DB_PASSWORD:-centralwatch-local-db-password}
+    volumes:
+      - proxy-db-storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U centralwatch -d centralwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
   # OpenTelemetry Collector — receives OTLP from the demo app and fans out
   # to Prometheus (metrics), Loki (logs) and Tempo (traces).
   otel-collector:
@@ -71,12 +96,25 @@ services:
       # in any shared environment; docker-compose.aws.yml REQUIRES it (no default).
       - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:-centralwatch-demo-secret-change-me}
       - TOKEN_TTL_SECONDS=86400
+      - PROXY_DB_HOST=proxy-db
+      - PROXY_DB_PORT=5432
+      - PROXY_DB_NAME=centralwatch
+      - PROXY_DB_USER=centralwatch
+      - PROXY_DB_PASSWORD=${PROXY_DB_PASSWORD:-centralwatch-local-db-password}
+      # DEV-ONLY AES-256 key (URL-safe base64 encoding of 32 bytes).
+      - PROXY_SECRET_ENCRYPTION_KEY=${PROXY_SECRET_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_METRICS_EXPORT_INTERVAL_MS=15000
       - INIT_RECONCILE_INTERVAL_SECONDS=60
       - LOCALSTACK_WAIT_TIMEOUT_SECONDS=120
       - SIMULATE_TIMEOUT_SECONDS=5
       - SIMULATE_RETRY_ATTEMPTS=3
+      # LocalStack remediations remain permission-gated in the dashboard/API.
+      - AWS_SECURITY_AGENT_ALLOW_REMEDIATION=true
+      # Docker Desktop reports requests to localhost:8000 as the bridge
+      # gateway. In local development only, treat that gateway as loopback so
+      # a 127.0.0.1 proxy allowlist matches the documented host curl workflow.
+      - PROXY_DOCKER_HOST_AS_LOOPBACK=true
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)\""]
       interval: 15s
@@ -84,6 +122,8 @@ services:
       start_period: 45s
       retries: 5
     depends_on:
+      proxy-db:
+        condition: service_healthy
       localstack:
         condition: service_healthy
       otel-collector:
@@ -225,6 +265,12 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Local-development read-only access lets CentralWatch embed dashboards
+      # without putting administrator credentials in the browser.
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_ANONYMOUS_HIDE_VERSION=true
       - GF_USERS_ALLOW_SIGN_UP=false
     networks:
       - centralwatch-network
@@ -269,6 +315,7 @@ networks:
     driver: bridge
 
 volumes:
+  proxy-db-storage:
   prometheus-storage:
   loki-storage:
   tempo-storage:
