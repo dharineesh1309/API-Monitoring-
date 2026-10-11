@@ -178,7 +178,7 @@ Prerequisites: Docker + Docker Compose v2 (README). No pre-built images, no pre-
 # 1. (optional) environment — docker-compose.yml ships dev defaults; AUTH_TOKEN_SECRET has a dev default
 cp .env.example .env            # repo root only if you need overrides
 
-# 2. Build + start all 8 services
+# 2. Build + start all 9 services
 docker compose up -d --build
 
 # 3. Health
@@ -380,7 +380,7 @@ Auth = `Authorization: Bearer <token>` required (except public). All from `route
 | GET | `/simulate/retry` | Retry demo | Bearer | — | `{status, attempts, buckets}` (2 simulated throttles then success) | S3 |
 | GET | `/healthz` | Liveness | public | — | `{status, service, version}` | none |
 | GET | `/livez` | Liveness | public | — | `{status:"alive"}` | none |
-| GET | `/readyz` | Readiness (AWS) | public | — | `{status:"ready",aws:"reachable",buckets:N}` or 503 | S3 (list_buckets) |
+| GET | `/readyz` | Readiness (AWS + proxy database) | public | — | `{status:"ready",aws:"reachable",proxy_database:"reachable",buckets:N}` or 503 | S3 (list_buckets), PostgreSQL ping |
 | GET | `/docs` | Swagger UI | public | — | OpenAPI docs | — |
 
 Error mapping (`utils/aws.py::aws_error_response`): no creds → 500 `AWSCredentialsError`; connection errors → 503; `NoSuchBucket/NoSuchKey/ResourceNotFoundException` → 404; `AccessDenied*` → 403; throttling → 429; `ValidationException` → 400; other ClientError → 502 [CODE].
@@ -502,11 +502,11 @@ Service name: `centralwatch-demo-app` [CODE].
 
 ## 16. DOCKER ARCHITECTURE
 
-**Dev (`docker-compose.yml`)** — 8 services, network `centralwatch-network` (explicit name, bridge), volumes `prometheus-storage`, `loki-storage`, `tempo-storage`, `grafana-storage`, `localstack-storage`. Healthchecks: demo-app (HTTP `/healthz` via python), localstack (`/_localstack/health`), loki/tempo/grafana (`wget` readiness). `depends_on`: demo-app → localstack (service_healthy) + otel-collector; frontend → demo-app; prometheus → otel-collector. LocalStack runs Lambda via a Docker socket mount (`DOCKER_SOCK_PATH`, `LAMBDA_REMOTE_DOCKER=true`, `LAMBDA_DOCKER_NETWORK=centralwatch-network`) [CODE].
+**Dev (`docker-compose.yml`)** — 9 services, network `centralwatch-network` (explicit name, bridge), volumes `proxy-db-storage`, `prometheus-storage`, `loki-storage`, `tempo-storage`, `grafana-storage`, `localstack-storage`. Healthchecks: proxy-db (`pg_isready`), demo-app (HTTP `/healthz` via python), localstack (`/_localstack/health`), loki/tempo/grafana (`wget` readiness). `depends_on`: demo-app → proxy-db + localstack (service_healthy) + otel-collector; frontend → demo-app; prometheus → otel-collector. LocalStack runs Lambda via a Docker socket mount (`DOCKER_SOCK_PATH`, `LAMBDA_REMOTE_DOCKER=true`, `LAMBDA_DOCKER_NETWORK=centralwatch-network`) [CODE].
 
-**AWS (`docker-compose.aws.yml`)** — 7 services (no localstack), same network + 4 volumes. demo-app `depends_on` only `otel-collector`. `AWS_ENDPOINT_URL` empty, `AWS_PROVISION_RESOURCES=false`, creds via `${AWS_*:-}` interpolation, `AUTH_TOKEN_SECRET`/`GRAFANA_ADMIN_PASSWORD` have **no default** (`:?` fails fast). Image `DEMO_APP_IMAGE` or build from `demo-app/` [CODE].
+**AWS (`docker-compose.aws.yml`)** — 8 services (no localstack), same network + 5 volumes. demo-app `depends_on` on healthy proxy-db and `otel-collector`. `AWS_ENDPOINT_URL` empty, `AWS_PROVISION_RESOURCES=false`, creds via `${AWS_*:-}` interpolation, `AUTH_TOKEN_SECRET`/`PROXY_DB_PASSWORD`/`PROXY_SECRET_ENCRYPTION_KEY`/`GRAFANA_ADMIN_PASSWORD` have **no default** (`:?` fails fast). Image `DEMO_APP_IMAGE` or build from `demo-app/` [CODE].
 
-**How LocalStack is removed from the AWS config:** the AWS file layers over the dev file (Compose merges per key), so the `localstack` service, the demo-app `depends_on: localstack`, and the `localstack-storage` volume would otherwise be inherited. `docker-compose.aws.yml` removes them with Compose's **`!reset` merge tags** (`localstack: !reset {}`, `depends_on: localstack: !reset`, `volumes: localstack-storage: !reset`), which delete the inherited keys instead of merging them (requires Compose ≥ 2.24) [CODE, VALIDATED with Compose v5.0.1: merged `config --services` = 7 services, no localstack; both merged and standalone `config --quiet` pass].
+**How LocalStack is removed from the AWS config:** the AWS file layers over the dev file (Compose merges per key), so the `localstack` service, the demo-app `depends_on: localstack`, and the `localstack-storage` volume would otherwise be inherited. `docker-compose.aws.yml` removes them with Compose's **`!reset` merge tags** (`localstack: !reset {}`, `depends_on: localstack: !reset`, `volumes: localstack-storage: !reset`), which delete the inherited keys instead of merging them (requires Compose ≥ 2.24) [CODE, VALIDATED with Compose v5.0.1: merged `config --services` = 8 services, no localstack; both merged and standalone `config --quiet` pass].
 
 ---
 
@@ -514,7 +514,7 @@ Service name: `centralwatch-demo-app` [CODE].
 
 - **`/healthz`** — 200 `{status:"ok", service, version}` (liveness; also the container healthcheck target) [CODE].
 - **`/livez`** — 200 `{status:"alive"}` (plain liveness) [CODE].
-- **`/readyz`** — calls `s3.list_buckets`; 200 `{status:"ready", aws:"reachable", buckets:N}` or 503 `{status:"not_ready", detail}` (readiness ⇔ AWS reachability) [CODE].
+- **`/readyz`** — pings PostgreSQL and calls `s3.list_buckets`; 200 `{status:"ready", aws:"reachable", proxy_database:"reachable", buckets:N}` or 503 `{status:"not_ready", detail}` [CODE].
 - **`scripts/healthcheck.sh [localstack|aws]`** — mode-aware deep check: container status for the mode's container set, HTTP readiness of collector (:8889/metrics), prometheus (/-/healthy), loki (/ready), tempo (/ready), grafana (/api/health), demo-app (/healthz), then Prometheus `/api/v1/targets` scrape-health of `otel-collector`. Exits non-zero on any failure. The `aws` mode **never requires LocalStack** and does not check the frontend [CODE, VALIDATED: full SUCCESS in aws mode].
 
 ---
@@ -563,7 +563,7 @@ All diagnostics are read-only. Symptom → likely cause → command → expected
 From a clean start (LocalStack dev mode — the fully validated path in this repo):
 
 1. **Start Docker** — ensure the Docker daemon is running.
-2. **Start CentralWatch** — `docker compose up -d --build` (8 services).
+2. **Start CentralWatch** — `docker compose up -d --build` (9 services).
 3. **Verify health** — `./scripts/healthcheck.sh` (all PASS) and `curl -s http://localhost:8000/readyz` → `{"status":"ready",...}`.
 4. **Open frontend** — `http://localhost:8080` (nginx SPA; proxy `/api/*` → backend).
 5. **Register** — UI Sign up (or `curl -X POST http://localhost:8000/auth/register -H 'Content-Type: application/json' -d '{"email":"alice@example.com","password":"secret123","name":"Alice"}'`). → 201 user; **telemetry:** `User Registration` span, DynamoDB PutItem span, log line.

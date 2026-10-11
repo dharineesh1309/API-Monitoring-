@@ -2,7 +2,7 @@
 
 > **Document type:** Technical reference (audit deliverable)
 > **Scope:** The system exactly as implemented and verified in this repository
-> **Verification basis:** Live execution against the running stack (all 8 containers),
+> **Verification basis:** Live execution against the running stack (all 9 containers),
 > plus direct queries of Prometheus, Loki, Tempo and Grafana. Evidence for each claim is
 > noted inline (file, endpoint, query, or observed response).
 
@@ -272,16 +272,16 @@ no WARN logs exist). All queries are valid; none error.
 
 ## 13. Docker
 
-- **Dev** (`docker-compose.yml`): 8 services on `centralwatch-network`; demo-app **built
+- **Dev** (`docker-compose.yml`): 9 services on `centralwatch-network`; demo-app **built
   from `./demo-app`** (Dockerfile present — no pre-built image required); LocalStack with
   Docker-socket mount for the Lambda sidecar (`DOCKER_SOCK_PATH` overridable);
-  named volumes for prometheus/loki/tempo/grafana/localstack; healthchecks on
-  demo-app/localstack/loki/tempo/grafana.
+  named volumes for proxy-db/prometheus/loki/tempo/grafana/localstack; healthchecks on
+  proxy-db/demo-app/localstack/loki/tempo/grafana.
 - **Prod** (`docker-compose.aws.yml`): same stack minus LocalStack;
   `AUTH_TOKEN_SECRET` and `GRAFANA_ADMIN_PASSWORD` are **required** (no defaults);
   `AWS_ENDPOINT_URL` empty; `AWS_PROVISION_RESOURCES=false`.
 - Reproducibility: `docker compose config` valid for both files; clean-environment
-  `docker compose build && docker compose up -d` verified earlier (all 8 containers up).
+  `docker compose build && docker compose up -d` verified earlier (all 9 containers up).
 - No orphan/legacy dependencies; the compose file pins an explicit network name.
 
 ---
