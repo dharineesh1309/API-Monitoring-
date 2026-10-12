@@ -53,10 +53,11 @@ exporters:
     tls:
       insecure: true
 
-  # Debug Exporter (replaces deprecated 'logging' exporter).
-  # Prints detailed telemetry records to standard output for debugging/monitoring pipeline validation.
+  # Debug exporter retained for opt-in troubleshooting. Do not attach it to
+  # normal pipelines: detailed telemetry dumps generate thousands of Docker
+  # log lines per minute and can make Docker Desktop sluggish.
   debug:
-    verbosity: detailed
+    verbosity: basic
 
   # Future OTLP Backend Exporter (Template for Member 4).
   # Commented out by default to avoid connection retry noise in logs.
@@ -75,17 +76,17 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       # Add 'otlp' to the list below once uncommented in exporters to stream metrics to the backend.
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
 
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [loki, debug]
+      exporters: [loki]
 
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/tempo, debug]
+      exporters: [otlp/tempo]
 
   # Telemetry configuration for the Collector's own internal metrics and logging.
   telemetry:

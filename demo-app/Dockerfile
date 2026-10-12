@@ -4,12 +4,11 @@
 #   docker compose build demo-app
 #   docker compose up -d demo-app
 #
-# The application is a passive telemetry GENERATOR for the CentralWatch
-# observability stack. It never proxies anything — it calls AWS (LocalStack in
-# dev, real AWS in production) and emits OpenTelemetry over OTLP to the
-# collector. All environment configuration (AWS endpoint, OTLP endpoint,
-# resource names, auth secret) is supplied at runtime via environment
-# variables — see .env.example and the root README.
+# The application generates telemetry for the CentralWatch observability stack
+# and hosts the managed API proxy control/data plane. Business workflows call
+# AWS (LocalStack in dev, real AWS in production) and emit OpenTelemetry over
+# OTLP to the collector. Configuration is supplied at runtime via environment
+# variables; see .env.example and the root README.
 
 FROM python:3.11-slim
 

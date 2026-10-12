@@ -1,15 +1,286 @@
 <!doctype html>
-<html lang="en" class="dark">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath d='M8 22V10l8 8 8-8v12' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="CentralWatch — demo business application that generates real API and AWS telemetry for the CentralWatch observability stack." />
-    <title>CentralWatch — Demo App</title>
-    <script type="module" crossorigin src="/assets/index-BniPkNHW.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CYINnyxf.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta id="theme-color" name="theme-color" content="#eef4ff">
+  <meta name="description" content="CentralWatch API operations and observability dashboard">
+  <title>CentralWatch</title>
+  <script>
+    (() => {
+      try {
+        const stored = localStorage.getItem("centralwatch-theme-preference") || localStorage.getItem("centralwatch-theme");
+        const preference = ["light", "dark"].includes(stored)
+          ? stored
+          : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.dataset.theme = preference;
+        localStorage.setItem("centralwatch-theme-preference", preference);
+        localStorage.removeItem("centralwatch-theme");
+      } catch (_) {
+        const preference = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.dataset.theme = preference;
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css?v=centralwatch-cyberpunk-20261009-5">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">C</span><div><strong>CentralWatch</strong><small>API operations</small></div></div>
+      <nav class="sidebar-nav" aria-label="Application navigation">
+        <p class="nav-label">Platform</p>
+        <a class="nav-link active" href="#overview" data-view-link="overview">Overview</a>
+        <a class="nav-link" href="#proxy" data-view-link="proxy">API proxy</a>
+        <a class="nav-link" href="#security" data-view-link="security">Security scan</a>
+        <a class="nav-link" href="#aws-security" data-view-link="aws-security">AWS security agent</a>
+        <a class="nav-link" href="#observability" data-view-link="observability">Observability</a>
+        <p class="nav-label">Demo application</p>
+        <a class="nav-link" href="#chat" data-view-link="chat">Gemini chatbot</a>
+        <a class="nav-link" href="#orders" data-view-link="orders">Orders</a>
+        <a class="nav-link" href="#files" data-view-link="files">Files</a>
+        <a class="nav-link" href="#aws" data-view-link="aws">AWS workflows</a>
+        <a class="nav-link" href="#simulations" data-view-link="simulations">Simulations</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="account-button" id="account-button" type="button"><span class="avatar" id="account-avatar">?</span><span><strong id="account-name">Sign in</strong><small id="account-detail">Required for demo APIs</small></span></button>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-title"><button class="icon-button mobile-menu" id="mobile-menu" type="button" aria-label="Open navigation">Menu</button><div><strong id="current-page-title">Overview</strong><small id="current-page-subtitle">Service health and recent activity</small></div></div>
+        <div class="topbar-actions"><span class="global-status" id="global-status"><i></i><span>Checking services</span></span><div class="theme-switcher" role="radiogroup" aria-label="Color theme"><button type="button" role="radio" aria-checked="false" data-theme-choice="light">Light</button><button type="button" role="radio" aria-checked="false" data-theme-choice="dark">Dark</button></div><a class="button secondary compact" href="/docs" target="_blank" rel="noopener">API docs</a></div>
+      </header>
+
+      <main class="content">
+        <section class="view active" data-view="overview" aria-labelledby="overview-title">
+          <div class="page-heading"><div><h1 id="overview-title">Overview</h1><p>Current state of the CentralWatch stack and its connected services.</p></div><button class="button secondary" id="refresh-health" type="button">Refresh</button></div>
+          <div class="summary-grid">
+            <article class="summary-card"><span>Services online</span><strong id="online-count">-</strong><small id="online-summary">Checking stack</small></article>
+            <article class="summary-card"><span>Managed proxies</span><strong id="service-count">-</strong><small>Configured upstream APIs</small></article>
+            <article class="summary-card"><span>Telemetry</span><strong id="telemetry-state">-</strong><small>Metrics, logs, and traces</small></article>
+            <article class="summary-card"><span>Last checked</span><strong id="last-check">-</strong><small>Automatic every 30 seconds</small></article>
+          </div>
+          <div class="layout-grid overview-grid">
+            <article class="card span-2">
+              <div class="card-header"><div><h2>Connected services</h2><p>Live checks through the frontend gateway.</p></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Purpose</th><th>Endpoint</th><th>Status</th><th></th></tr></thead><tbody id="system-table-body"><tr><td colspan="5"><div class="loading-state"><i></i>Checking services…</div></td></tr></tbody></table></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h2>Quick access</h2><p>Primary operational interfaces.</p></div></div>
+              <div class="link-list">
+                <a href="#proxy"><span><strong>API proxy</strong><small>Manage upstream credentials</small></span><b>Open</b></a>
+                <a href="#security"><span><strong>Security scanner</strong><small>Run authenticated ASTF scans</small></span><b>Open</b></a>
+                <a class="external-link" data-port="3000" href="#"><span><strong>Grafana</strong><small>Dashboards and exploration</small></span><b>Open</b></a>
+                <a href="/docs" target="_blank" rel="noopener"><span><strong>Swagger UI</strong><small>Complete backend API</small></span><b>Open</b></a>
+              </div>
+            </article>
+            <article class="card span-3">
+              <div class="card-header"><div><h2>Recent activity</h2><p>Actions performed from this browser.</p></div><button class="button ghost compact" id="clear-activity" type="button">Clear</button></div>
+              <div class="activity-list" id="activity-list"><div class="empty-state"><strong>No recent activity</strong><span>Completed actions will appear here.</span></div></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="proxy" aria-labelledby="proxy-title" hidden>
+          <div class="page-heading"><div><h1 id="proxy-title">API proxy</h1><p>Protect upstream credentials with IP, proxy-token, and role policies while monitoring every request.</p></div><button class="button secondary" id="refresh-services" type="button">Refresh proxy data</button></div>
+          <div class="layout-grid proxy-grid">
+            <article class="card span-2">
+              <div class="card-header stack-mobile"><div><h2>Managed services</h2><p>The upstream key is hidden. Callers receive a separate proxy token whose hash is stored by CentralWatch.</p></div><input class="search-input" id="proxy-search" type="search" placeholder="Search services" aria-label="Search proxy services"></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Base URL</th><th>Allowed IPs</th><th>Role</th><th>Proxy token</th><th>Auth / key</th><th></th></tr></thead><tbody id="service-table-body"><tr><td colspan="7"><div class="loading-state"><i></i>Loading registry…</div></td></tr></tbody></table></div>
+            </article>
+            <article class="card">
+              <div class="card-header"><div><h2>Add service</h2><p>Existing service IDs are replaced by the backend.</p></div></div>
+              <form class="form" id="proxy-form">
+                <label>Service ID<input id="input-service" name="service_name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" placeholder="example_api"></label>
+                <label>Target base URL<input id="input-url" name="base_url" type="url" required placeholder="https://api.example.com/v1"></label>
+                <label>Secret API key<input id="input-key" name="api_key" type="password" required autocomplete="off" placeholder="Stored by CentralWatch"></label>
+                <label>Allowed IPs or CIDRs<input id="input-ips" name="allowed_ips" required value="127.0.0.1, 10.0.0.0/8"></label>
+                <label>Access role<select id="proxy-service-role" name="role_name" required><option value="">Select a role</option></select><small>The role limits which services and HTTP methods this token may use.</small></label>
+                <label>Upstream authentication<select name="auth_type"><option value="bearer">Authorization: Bearer</option><option value="x-goog-api-key">Gemini x-goog-api-key</option></select></label>
+                <label>Upstream timeout (seconds)<input name="timeout_seconds" type="number" min="1" max="120" step="1" value="10" required></label>
+                <button class="button primary" id="submit-proxy" type="submit">Save service</button><p class="form-message" id="proxy-form-message" role="status"></p>
+              </form>
+              <div class="token-result" id="proxy-access-token-result" hidden><strong>Copy this proxy token now</strong><p>The real upstream API key remains in CentralWatch. Only this token's hash is stored.</p><div><code id="proxy-access-token"></code><button class="button secondary compact" id="copy-proxy-access-token" type="button">Copy token</button></div></div>
+            </article>
+            <article class="card span-3 endpoint-card"><div><h2>Application endpoint</h2><p>Applications send the generated token as <code>X-CentralWatch-Proxy-Token</code>. They never receive the upstream API key.</p></div><code id="endpoint-example">http://127.0.0.1:8000/centralwatch/proxy/{service}/{path}</code><button class="button secondary compact" id="copy-endpoint" type="button">Copy</button></article>
+          </div>
+
+          <div class="summary-grid proxy-metrics-grid" aria-label="Proxy API metrics">
+            <article class="summary-card"><span>Total requests</span><strong id="proxy-total-requests">0</strong><small id="proxy-metrics-since">0/min · current process</small></article>
+            <article class="summary-card"><span>Success rate</span><strong id="proxy-success-rate">0%</strong><small id="proxy-success-count">0 successful</small></article>
+            <article class="summary-card"><span>Blocked</span><strong id="proxy-blocked-count">0</strong><small>IP or role policy</small></article>
+            <article class="summary-card"><span>Server errors</span><strong id="proxy-error-count">0</strong><small>Upstream 5xx or failures</small></article>
+            <article class="summary-card"><span>Average latency</span><strong id="proxy-average-latency">0 ms</strong><small>All recorded requests</small></article>
+            <article class="summary-card"><span>P95 latency</span><strong id="proxy-p95-latency">0 ms</strong><small>95th percentile</small></article>
+          </div>
+
+          <div class="layout-grid proxy-access-grid">
+            <article class="card">
+              <div class="card-header"><div><h2>Access roles</h2><p>Restrict each proxy token to selected services and HTTP methods.</p></div></div>
+              <form class="form" id="proxy-role-form">
+                <label>Role name<input name="role_name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" placeholder="reporting_reader"></label>
+                <label>Allowed services<input name="allowed_services" required placeholder="test_service or *"><small>Comma-separated service IDs. Use * for every service.</small></label>
+                <label>Allowed methods<input name="allowed_methods" required value="GET" placeholder="GET, POST"></label>
+                <button class="button primary" id="save-proxy-role" type="submit">Save role</button><p class="form-message" id="proxy-role-message" role="status"></p>
+              </form>
+              <div class="section-divider"></div>
+              <div class="table-wrap"><table><thead><tr><th>Role</th><th>Services</th><th>Methods</th><th>Assigned APIs</th></tr></thead><tbody id="proxy-roles-body"><tr><td colspan="4"><div class="loading-state"><i></i>Loading roles…</div></td></tr></tbody></table></div>
+            </article>
+            <article class="card span-2">
+              <div class="card-header"><div><h2>Traffic breakdown</h2><p>Request volume, outcomes, and latency by upstream service.</p></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Requests</th><th>Successful</th><th>Blocked</th><th>Errors</th><th>Avg latency</th></tr></thead><tbody id="proxy-service-metrics-body"><tr><td colspan="6"><div class="empty-state compact"><strong>No proxy traffic</strong><span>Metrics appear after the first request.</span></div></td></tr></tbody></table></div>
+              <dl class="detail-list proxy-breakdown"><div><dt>Methods</dt><dd id="proxy-method-metrics">None</dd></div><div><dt>Status codes</dt><dd id="proxy-status-metrics">None</dd></div><div><dt>Request bytes</dt><dd id="proxy-bytes-in">0 B</dd></div><div><dt>Response bytes</dt><dd id="proxy-bytes-out">0 B</dd></div><div><dt>Unique client IPs</dt><dd id="proxy-unique-ips">0</dd></div><div><dt>Authenticated proxy tokens</dt><dd id="proxy-token-count">0</dd></div></dl>
+            </article>
+            <article class="card span-3 proxy-history-card">
+              <div class="card-header stack-mobile"><div><h2>API usage history</h2><p>Recent proxy calls. Secrets, bodies, and query values are never recorded.</p></div><div class="filter-row"><input class="search-input" id="proxy-history-search" type="search" placeholder="Search service, role, or IP"><select id="proxy-history-outcome" aria-label="Filter usage outcome"><option value="">All outcomes</option><option value="success">Successful</option><option value="blocked">Blocked</option><option value="error">Errors</option></select></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Time</th><th>Service</th><th>Request</th><th>Client IP</th><th>Role / token</th><th>Outcome</th><th>Status</th><th>Latency</th><th>Traffic</th></tr></thead><tbody id="proxy-history-body"><tr><td colspan="9"><div class="empty-state"><strong>No usage recorded</strong><span>Proxy requests will appear here.</span></div></td></tr></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="security" aria-labelledby="security-title" hidden>
+          <div class="page-heading"><div><h1 id="security-title">Security scan</h1><p>Run the OWASP API Security Testing Framework against the demo application.</p></div><span class="status-badge neutral" id="scan-state"><i></i><span>Idle</span></span></div>
+          <div class="auth-notice" id="security-auth-required"><div><strong>Authentication required</strong><span>Sign in with a CentralWatch account to run a security scan.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="layout-grid security-grid" id="security-content" hidden>
+            <article class="card span-2">
+              <div class="card-header"><div><h2>Scan target</h2><p>The scan runs synchronously and can take several minutes.</p></div></div>
+              <form class="form horizontal-form" id="security-scan-form"><label>Target URL<input id="scan-target" name="target_url" type="url" value="http://127.0.0.1:8000" required></label><button class="button primary" id="trigger-security-scan" type="submit">Trigger scan</button></form>
+              <div class="progress-state" id="scan-progress" hidden><i></i><div><strong>Scanning API</strong><span>Keep this page open while ASTF generates the report.</span></div></div><p class="form-message" id="scan-message" role="status">Ready to start a scan.</p>
+            </article>
+            <article class="card scan-result" id="scan-result" hidden>
+              <div class="card-header"><div><h2>Latest report</h2><p>Generated by OWASP ASTF.</p></div></div><strong class="result-title" id="scan-result-title">Report generated</strong>
+              <dl class="detail-list"><div><dt>Target</dt><dd id="scan-result-target">-</dd></div><div><dt>Report size</dt><dd id="scan-result-size">-</dd></div><div><dt>Findings</dt><dd id="scan-result-findings">-</dd></div></dl>
+              <button class="button secondary" id="open-security-report" type="button" aria-controls="security-report-panel" aria-expanded="false">View report here</button>
+            </article>
+          <article class="card span-3 security-report-card" id="security-report-panel" hidden>
+              <div class="security-report-shell">
+                <div class="frame-loading" id="security-report-loading" role="status" aria-live="polite"><i></i><span>Loading generated report</span></div>
+                <div class="empty-state error" id="security-report-error" role="alert" hidden><strong>Report unavailable</strong><span id="security-report-error-message">The report could not be loaded.</span></div>
+                <iframe id="security-report-frame" title="OWASP security scan report" sandbox="allow-scripts" referrerpolicy="no-referrer" hidden></iframe>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="aws-security" aria-labelledby="aws-security-title" hidden>
+          <div class="page-heading"><div><h1 id="aws-security-title">AWS security agent</h1><p>Assess the configured AWS resources against a minimum-security baseline and approve selected fixes.</p></div><span class="status-badge neutral" id="aws-agent-state"><i></i><span>Not scanned</span></span></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to scan AWS configuration and review remediation proposals.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="protected-content" data-protected-content hidden>
+            <article class="card agent-control-card">
+              <div class="agent-control-copy"><h2>Configured-resource baseline</h2><p>The scan is read-only. It checks the CentralWatch S3 bucket, DynamoDB tables, SQS queue, SNS topic, and Lambda function.</p></div>
+              <button class="button primary" id="run-aws-security-scan" type="button">Run security scan</button>
+            </article>
+            <div class="permission-note"><div><strong>No automatic changes</strong><span>CentralWatch applies only the failed controls you select, and only after a separate confirmation prompt.</span></div><span class="status-badge neutral" id="remediation-policy"><span>Policy unknown</span></span></div>
+            <div id="aws-agent-results" hidden>
+              <div class="agent-summary">
+                <article><span>Controls checked</span><strong id="agent-total">0</strong></article>
+                <article><span>Protected</span><strong id="agent-passed">0</strong></article>
+                <article class="risk-summary high"><span>High risks</span><strong id="agent-high">0</strong></article>
+                <article class="risk-summary medium"><span>Medium risks</span><strong id="agent-medium">0</strong></article>
+                <article class="risk-summary low"><span>Low risks</span><strong id="agent-low">0</strong></article>
+              </div>
+              <article class="card agent-findings-card">
+                <div class="card-header stack-mobile"><div><h2>Threats and configuration risks</h2><p id="agent-scan-meta">Run a scan to assess the configured resources.</p></div><div class="button-row"><button class="button ghost compact" id="select-agent-findings" type="button">Select actionable</button><button class="button primary compact" id="apply-agent-findings" type="button" disabled>Apply selected</button></div></div>
+                <div class="table-wrap"><table><thead><tr><th class="select-column"><span class="sr-only">Select</span></th><th>Control</th><th>Resource</th><th>Risk level</th><th>Result</th><th>Threat or exposure</th><th>Recommended fix</th></tr></thead><tbody id="aws-findings-body"></tbody></table></div>
+                <p class="form-message" id="aws-agent-message" role="status"></p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="observability" aria-labelledby="observability-title" hidden>
+          <div class="page-heading"><div><h1 id="observability-title">Observability</h1><p>Provisioned Grafana dashboards for metrics, logs, traces, AWS, and security signals.</p></div><a class="button secondary external-link" data-port="3000" href="#" target="_blank" rel="noopener">Open Grafana</a></div>
+          <article class="card grafana-card">
+            <div class="card-header"><div><h2 id="embed-dashboard-title">System overview</h2><p>Live Grafana dashboard. Refresh interval: 30 seconds.</p></div><div class="button-row"><button class="button ghost compact" id="reload-grafana" type="button">Reload</button><a class="button secondary compact" id="open-current-grafana" href="#" target="_blank" rel="noopener">Full screen</a></div></div>
+            <div class="tabs" role="tablist" aria-label="Grafana dashboards">
+              <button class="tab active" type="button" role="tab" aria-selected="true" data-title="System overview" data-path="/d/centralwatch-overview/centralwatch-e28094-overview">Overview</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="API monitoring" data-path="/d/centralwatch-api-monitoring/centralwatch-e28094-api-monitoring">API</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="AWS services" data-path="/d/centralwatch-aws-services/centralwatch-e28094-aws-services">AWS</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="Business metrics" data-path="/d/centralwatch-business-metrics/centralwatch-e28094-business-metrics">Business</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="Application logs" data-path="/d/centralwatch-logs/centralwatch-e28094-logs">Logs</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="Distributed tracing" data-path="/d/centralwatch-tracing/centralwatch-e28094-tracing">Traces</button><button class="tab" type="button" role="tab" aria-selected="false" data-title="Security intelligence" data-path="/d/security/security-and-threat-intelligence">Security</button>
+            </div>
+            <div class="embed-frame-shell"><div class="frame-loading" id="grafana-loader"><i></i><span>Loading Grafana…</span></div><iframe id="grafana-frame" title="Embedded Grafana dashboard" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
+          </article>
+        </section>
+
+        <section class="view" data-view="chat" aria-labelledby="chat-title" hidden>
+          <div class="page-heading"><div><h1 id="chat-title">Gemini chatbot</h1><p>Send prompts through CentralWatch without placing the Gemini API key in the demo application's environment.</p></div><button class="button ghost" id="clear-chat" type="button">Clear conversation</button></div>
+          <div class="layout-grid chat-grid">
+            <article class="card span-2 chat-card">
+              <div class="card-header"><div><h2>Conversation</h2><p>The demo app sends your prompt and proxy token to CentralWatch. Only CentralWatch adds the Gemini key.</p></div><span class="status-badge neutral" id="chat-ready-state"><i></i><span>Setup required</span></span></div>
+              <div class="chat-messages" id="chat-messages" aria-live="polite"><div class="empty-state"><strong>No messages yet</strong><span>Configure Gemini, then send a prompt.</span></div></div>
+              <form class="chat-compose" id="chat-form">
+                <label class="sr-only" for="chat-prompt">Prompt</label><textarea id="chat-prompt" name="prompt" required maxlength="8000" rows="3" placeholder="Ask Gemini something..."></textarea>
+                <div class="chat-compose-actions"><label>Model<input id="chat-model" name="model" value="gemini-3.8-flash" required maxlength="100" pattern="[A-Za-z0-9._-]+"></label><button class="button primary" id="send-chat" type="submit">Send prompt</button></div>
+                <p class="form-message" id="chat-message" role="status"></p>
+              </form>
+            </article>
+            <article class="card chat-setup-card">
+              <div class="card-header"><div><h2>Gemini connection</h2><p>The key is submitted directly to the CentralWatch service registry and cleared from this form.</p></div></div>
+              <dl class="detail-list"><div><dt>Service</dt><dd><code>gemini_api</code></dd></div><div><dt>Role</dt><dd><code>gemini_chat</code> · POST only</dd></div><div><dt>Key status</dt><dd id="gemini-key-status">Checking...</dd></div><div><dt>Proxy token</dt><dd id="gemini-token-status">Not loaded</dd></div></dl>
+              <form class="form" id="gemini-config-form"><label>Gemini API key<input id="gemini-api-key" name="api_key" type="password" required autocomplete="off" placeholder="Paste key from Google AI Studio"><small>Not written to the demo app environment or browser storage.</small></label><button class="button primary" id="configure-gemini" type="submit">Save key in CentralWatch</button><p class="form-message" id="gemini-config-message" role="status"></p></form>
+              <div class="section-divider"></div>
+              <form class="form" id="gemini-token-form"><label>Existing CentralWatch proxy token<input id="gemini-proxy-token" name="proxy_token" type="password" autocomplete="off" placeholder="cw_proxy_..."><small>Use this after a page reload or when the token was created on the API proxy page.</small></label><button class="button secondary" type="submit">Use proxy token</button><p class="form-message" id="gemini-token-message" role="status"></p></form>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="orders" aria-labelledby="orders-title" hidden>
+          <div class="page-heading"><div><h1 id="orders-title">Orders</h1><p>Create and inspect DynamoDB-backed orders from the demo API.</p></div><div class="button-row"><button class="button secondary" id="refresh-orders" type="button">Refresh</button><button class="button primary" id="new-order" type="button">New order</button></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to access orders.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <article class="card protected-content" data-protected-content hidden>
+            <div class="card-header stack-mobile"><div><h2>Order history</h2><p>Up to 50 orders returned by the backend.</p></div><div class="filter-row"><input class="search-input" id="orders-search" type="search" placeholder="Search orders"><select id="orders-status" aria-label="Filter order status"><option value="">All statuses</option><option value="created">Created</option></select><select id="orders-sort" aria-label="Sort orders"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="total-desc">Highest total</option><option value="total-asc">Lowest total</option></select></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Order ID</th><th>User</th><th>Items</th><th>Total</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody id="orders-table-body"><tr><td colspan="7"><div class="loading-state"><i></i>Loading orders…</div></td></tr></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" data-view="files" aria-labelledby="files-title" hidden>
+          <div class="page-heading"><div><h1 id="files-title">Files</h1><p>Upload files to S3 and manage their DynamoDB metadata.</p></div><button class="button secondary" id="refresh-files" type="button">Refresh</button></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to access files.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="layout-grid protected-content" data-protected-content hidden>
+            <article class="card span-3"><form class="upload-form" id="file-upload-form"><label>Upload file<input id="file-upload-input" name="file" type="file" required></label><button class="button primary" id="upload-file" type="submit">Upload</button><span class="form-message" id="file-upload-message" role="status"></span></form></article>
+            <article class="card span-3">
+              <div class="card-header stack-mobile"><div><h2>Stored files</h2><p>Files in the configured S3 bucket.</p></div><div class="filter-row"><input class="search-input" id="files-search" type="search" placeholder="Search files"><select id="files-sort" aria-label="Sort files"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="size-desc">Largest first</option><option value="size-asc">Smallest first</option></select></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Created</th><th></th></tr></thead><tbody id="files-table-body"><tr><td colspan="5"><div class="loading-state"><i></i>Loading files…</div></td></tr></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="aws" aria-labelledby="aws-title" hidden>
+          <div class="page-heading"><div><h1 id="aws-title">AWS workflows</h1><p>Exercise the LocalStack-backed SNS, SQS, S3, and Lambda integrations.</p></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to run AWS workflows.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="layout-grid protected-content" data-protected-content hidden>
+            <article class="card"><div class="card-header"><div><h2>Notification</h2><p>Publish an email or SMS notification through SNS.</p></div></div><form class="form" id="notification-form"><label>Channel<select id="notification-channel" name="channel"><option value="email">Email</option><option value="sms">SMS</option></select></label><label>Recipient<input name="recipient" required placeholder="user@example.com or +15551234567"></label><label class="notification-subject">Subject<input name="subject" maxlength="200" placeholder="Optional subject"></label><label>Message<textarea name="message" required rows="4" placeholder="Notification message"></textarea></label><button class="button primary" id="send-notification" type="submit">Send notification</button><p class="form-message" id="notification-message" role="status"></p></form></article>
+            <article class="card"><div class="card-header"><div><h2>Queue</h2><p>Send and receive messages through SQS.</p></div></div><form class="form" id="queue-form"><label>Message body<textarea name="body" required rows="4" placeholder="Message for the queue"></textarea></label><button class="button primary" id="send-queue-message" type="submit">Send message</button><p class="form-message" id="queue-send-message" role="status"></p></form><div class="section-divider"></div><div class="card-header compact-header"><div><h3>Received messages</h3><p>Receiving removes messages from the queue.</p></div><button class="button secondary compact" id="receive-queue" type="button">Receive</button></div><div class="message-list" id="queue-message-list"><div class="empty-state compact"><strong>No messages loaded</strong><span>Select Receive to check the queue.</span></div></div></article>
+            <article class="card"><div class="card-header"><div><h2>Image processing</h2><p>Run the S3 → Lambda → SNS workflow.</p></div></div><form class="form" id="image-form"><label>Image file<input id="image-input" name="file" type="file" accept="image/*" required></label><button class="button primary" id="process-image" type="submit">Process image</button><p class="form-message" id="image-message" role="status"></p></form><div class="result-box" id="image-result" hidden></div></article>
+          </div>
+        </section>
+
+        <section class="view" data-view="simulations" aria-labelledby="simulations-title" hidden>
+          <div class="page-heading"><div><h1 id="simulations-title">Simulations</h1><p>Generate deliberate telemetry scenarios and inspect the results in Grafana.</p></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to run simulations.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="card protected-content" data-protected-content hidden><div class="simulation-list"><article><div><strong>Application error</strong><p>Returns an intentional HTTP 500 and produces an error trace and log.</p></div><button class="button secondary" type="button" data-simulation="error">Run</button><pre data-simulation-result="error" hidden></pre></article><article><div><strong>Slow request</strong><p>Waits five seconds before returning successfully to create a latency trace.</p></div><button class="button secondary" type="button" data-simulation="timeout">Run</button><pre data-simulation-result="timeout" hidden></pre></article><article><div><strong>S3 failure</strong><p>Attempts to write to an invalid bucket and returns the expected HTTP 502.</p></div><button class="button secondary" type="button" data-simulation="s3-error">Run</button><pre data-simulation-result="s3-error" hidden></pre></article><article><div><strong>Retry sequence</strong><p>Runs the configured retry workflow and returns after the third attempt.</p></div><button class="button secondary" type="button" data-simulation="retry">Run</button><pre data-simulation-result="retry" hidden></pre></article></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog class="dialog" id="auth-dialog">
+    <div class="dialog-header"><div><h2 id="auth-dialog-title">Sign in</h2><p id="auth-dialog-subtitle">Use a CentralWatch account to access protected APIs.</p></div><button class="icon-button" type="button" data-dialog-close="auth-dialog" aria-label="Close">Close</button></div>
+    <div class="dialog-body">
+      <div id="auth-forms"><div class="tabs auth-tabs"><button class="tab active" id="show-login" type="button">Sign in</button><button class="tab" id="show-register" type="button">Create account</button></div><form class="form" id="login-form"><label>Email<input name="email" type="email" autocomplete="username" required placeholder="operator@example.com"></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="button primary" id="login-submit" type="submit">Sign in</button><p class="form-message" id="login-message" role="status"></p></form><form class="form" id="register-form" hidden><label>Name<input name="name" autocomplete="name" required maxlength="100" placeholder="Operator name"></label><label>Email<input name="email" type="email" autocomplete="email" required placeholder="operator@example.com"></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label><label>Allowed CIDRs<input name="allowed_cidrs" value="0.0.0.0/0, ::/0" required><small>Comma-separated network ranges for this local account.</small></label><button class="button primary" id="register-submit" type="submit">Create account</button><p class="form-message" id="register-message" role="status"></p></form></div>
+      <div id="account-profile" hidden><div class="profile-heading"><span class="avatar large" id="profile-avatar">?</span><div><strong id="profile-name">-</strong><span id="profile-email">-</span></div></div><dl class="detail-list"><div><dt>User ID</dt><dd id="profile-user-id">-</dd></div><div><dt>Status</dt><dd id="profile-status">-</dd></div><div><dt>Allowed networks</dt><dd id="profile-cidrs">-</dd></div></dl><button class="button danger" id="sign-out" type="button">Sign out</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog wide" id="order-dialog">
+    <div class="dialog-header"><div><h2>Create order</h2><p>Add one or more products to a new DynamoDB order.</p></div><button class="icon-button" type="button" data-dialog-close="order-dialog" aria-label="Close">Close</button></div>
+    <form class="dialog-body form" id="order-form"><label>User ID<input id="order-user-id" name="user_id" required></label><div class="order-items-heading"><strong>Items</strong><button class="button secondary compact" id="add-order-item" type="button">Add item</button></div><div class="order-items" id="order-items"></div><div class="dialog-actions"><span class="form-message" id="order-message" role="status"></span><button class="button primary" id="create-order" type="submit">Create order</button></div></form>
+  </dialog>
+
+  <dialog class="dialog" id="detail-dialog"><div class="dialog-header"><div><h2 id="detail-title">Details</h2><p id="detail-subtitle"></p></div><button class="icon-button" type="button" data-dialog-close="detail-dialog" aria-label="Close">Close</button></div><div class="dialog-body" id="detail-content"></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js?v=centralwatch-cyberpunk-20261009-5" defer></script>
+</body>
 </html>

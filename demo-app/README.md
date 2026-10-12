@@ -55,14 +55,37 @@ Creation is **idempotent**: it runs at startup, on a periodic reconciliation loo
 
 ### Run locally (outside Docker)
 
-```bash
-cd demo-app
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-export AWS_ENDPOINT_URL=http://localhost:4566
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+Use Python **3.11**, which is also the version used by the Docker image. From the
+repository root on Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r .\demo-app\requirements.txt
+python -m pip install -e .\centralwatch-security
+
+# The host-run app still needs these two Docker services.
+docker compose up -d localstack otel-collector
+Copy-Item .\demo-app\.env.example .\demo-app\.env
+
+# Configure demo-app/.env for local development:
+# AWS_ENDPOINT_URL=http://127.0.0.1:4566
+# AWS_ACCESS_KEY_ID=test
+# AWS_SECRET_ACCESS_KEY=test
+# AWS_S3_ADDRESSING_STYLE=path
+# AWS_PROVISION_RESOURCES=true
+# LAMBDA_ROLE_ARN=arn:aws:iam::000000000000:role/centralwatch-lambda-role
+# OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+# AUTH_TOKEN_SECRET=choose-a-local-development-secret
+
+Set-Location .\demo-app
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
+
+If the Compose `demo-app` is already running, port 8000 is occupied. Stop that
+one service first (`docker compose stop demo-app`) or use `--port 8001` for the
+venv process. Activating the venv starts only FastAPI; Grafana, the frontend,
+Prometheus, Loki, Tempo, LocalStack, and the collector are Docker services.
 
 ---
 
@@ -94,6 +117,7 @@ Interactive docs: **http://localhost:8000/docs** (Swagger UI)
 | GET    | `/simulate/timeout`       | —                   | Sleeps `SIMULATE_TIMEOUT_SECONDS` (5 s) |
 | GET    | `/simulate/s3-error`      | S3 (bad bucket)     | Deliberate AWS failure (502)            |
 | GET    | `/simulate/retry`         | S3                  | Throttled twice, then succeeds          |
+| POST   | `/chat`                   | CentralWatch + Gemini | Requires `X-CentralWatch-Proxy-Token`  |
 | GET    | `/healthz` `/livez` `/readyz` | S3 (readyz)     | Liveness/readiness probes               |
 
 ---

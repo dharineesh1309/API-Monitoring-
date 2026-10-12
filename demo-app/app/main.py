@@ -19,7 +19,7 @@ from opentelemetry.trace import Status, StatusCode
 from centralwatch_security import SecurityEnforcementMiddleware, create_security_router
 
 from .config.settings import get_settings
-from .routes import auth, files, images, notifications, orders, queue, simulate
+from .routes import auth, chat, files, images, notifications, orders, queue, security_agent, simulate
 from .routes.simulate import SimulatedAWSError, SimulatedFailure
 from .services import Container
 from .telemetry.instrumentation import configure_telemetry, instrument_app, shutdown_telemetry
@@ -291,6 +291,11 @@ def create_app() -> FastAPI:
         prefix="/centralwatch",
     )
 
+    @app.get("/", include_in_schema=False)
+    async def root():
+        """Give browser users a useful landing page instead of a bare 404."""
+        return RedirectResponse(url="/docs", status_code=307)
+
     @app.get("/healthz", tags=["health"])
     async def healthz(request: Request):
         s = request.app.state.settings
@@ -304,8 +309,17 @@ def create_app() -> FastAPI:
     async def readyz(request: Request):
         container: Container = request.app.state.container
         try:
+            proxy_store = getattr(request.app.state, "centralwatch_proxy_store", None)
+            if proxy_store is None:
+                raise RuntimeError("Proxy configuration database is not initialized")
+            await proxy_store.ping()
             buckets = await asyncio.to_thread(container.s3.list_buckets)
-            return {"status": "ready", "aws": "reachable", "buckets": len(buckets)}
+            return {
+                "status": "ready",
+                "aws": "reachable",
+                "proxy_database": "reachable",
+                "buckets": len(buckets),
+            }
         except Exception as exc:  # noqa: BLE001
             logger.warning("Readiness check failed: %s", exc)
             return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(exc)})

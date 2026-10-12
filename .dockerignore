@@ -1,0 +1,15 @@
+.git
+.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+frontend/node_modules
+frontend/dist
+demo-app/lambda-package
+demo-app/lambda.zip
+*.log
+*.pdf
+*.xlsx
+*.zip

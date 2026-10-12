@@ -27,6 +27,24 @@
 # ============================================================
 
 services:
+  proxy-db:
+    image: postgres:16-alpine
+    container_name: centralwatch-proxy-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${PROXY_DB_NAME:-centralwatch}
+      - POSTGRES_USER=${PROXY_DB_USER:-centralwatch}
+      - POSTGRES_PASSWORD=${PROXY_DB_PASSWORD:?PROXY_DB_PASSWORD must be set}
+    volumes:
+      - proxy-db-storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PROXY_DB_USER:-centralwatch} -d ${PROXY_DB_NAME:-centralwatch}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - centralwatch-network
+
   # Remove the LocalStack service inherited from docker-compose.yml (dev).
   # `!reset` (Compose >= 2.24) deletes the key instead of merging it.
   localstack: !reset {}
@@ -81,6 +99,12 @@ services:
       # REQUIRED — no default. Compose fails fast if it is not set.
       - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET must be set}
       - TOKEN_TTL_SECONDS=${TOKEN_TTL_SECONDS:-86400}
+      - PROXY_DB_HOST=proxy-db
+      - PROXY_DB_PORT=5432
+      - PROXY_DB_NAME=${PROXY_DB_NAME:-centralwatch}
+      - PROXY_DB_USER=${PROXY_DB_USER:-centralwatch}
+      - PROXY_DB_PASSWORD=${PROXY_DB_PASSWORD:?PROXY_DB_PASSWORD must be set}
+      - PROXY_SECRET_ENCRYPTION_KEY=${PROXY_SECRET_ENCRYPTION_KEY:?PROXY_SECRET_ENCRYPTION_KEY must be set}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_METRICS_EXPORT_INTERVAL_MS=${OTEL_METRICS_EXPORT_INTERVAL_MS:-15000}
       - INIT_RECONCILE_INTERVAL_SECONDS=${INIT_RECONCILE_INTERVAL_SECONDS:-60}
@@ -101,6 +125,8 @@ services:
     depends_on:
       # Remove the LocalStack dependency inherited from docker-compose.yml.
       localstack: !reset
+      proxy-db:
+        condition: service_healthy
       otel-collector:
         condition: service_started
     networks:
@@ -187,6 +213,7 @@ networks:
     driver: bridge
 
 volumes:
+  proxy-db-storage:
   prometheus-storage:
   loki-storage:
   tempo-storage:

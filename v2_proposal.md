@@ -97,7 +97,7 @@ Based on the feedback review:
 ## 🚦 Implementation Plan & Milestones
 
 1. **Milestone 1:** Implement Hybrid Security Gateway Middleware (403 Block + Security Audit Telemetry).
-2. **Milestone 3:** Set up OWASP ASTF Security Scanner container service & `/simulate/security-scan` on-demand endpoint.
+2. **Milestone 2:** Set up OWASP ASTF Security Scanner container service & `/simulate/security-scan` on-demand endpoint.
 3. **Milestone 3:** Configure OpenTelemetry security counters & Loki threat log parsers.
 4. **Milestone 4:** Provision Grafana Security & Threat Intelligence Dashboard (`security.json`).
 5. **Milestone 5:** Verification & End-to-End Walkthrough testing.
