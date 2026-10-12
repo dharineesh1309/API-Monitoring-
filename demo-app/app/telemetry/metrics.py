@@ -40,3 +40,13 @@ class BusinessMetrics:
             description="Total number of AWS SDK retry attempts",
             unit="1",
         )
+        self.security_scans = meter.create_counter(
+            "security.scans_total",
+            description="Total number of AWS minimum-security scans",
+            unit="1",
+        )
+        self.security_remediations = meter.create_counter(
+            "security.remediations_total",
+            description="Total number of permission-gated AWS security remediations",
+            unit="1",
+        )

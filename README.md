@@ -40,10 +40,11 @@ networks, no pre-created resources**.
 docker compose up -d --build
 ```
 
-This builds and starts all 8 services on one shared network (`centralwatch-network`):
+This builds and starts all 9 services on one shared network (`centralwatch-network`):
 
 | Service | Container | Host port | Purpose |
 | :--- | :--- | :--- | :--- |
+| `proxy-db` | `centralwatch-proxy-db` | internal only | PostgreSQL store for proxy services, roles, encrypted API keys, and token hashes |
 | `frontend` | `centralwatch-frontend` | `8080` | Serves the built React SPA, proxies `/api/*` → backend |
 | `demo-app` | `centralwatch-demo-app` | `8000` | FastAPI app (`/docs` for Swagger) |
 | `localstack` | `centralwatch-localstack` | `4566` | AWS emulation (S3, DynamoDB, SNS, SQS, Lambda) |
@@ -118,12 +119,21 @@ run). Never commit the filled-in file — `.env` is gitignored.
 > SDK calls in the source. It has **not** been exercised against a live AWS account in this
 > environment — see the limitation note in `AWS_DEPLOYMENT.md`.
 
-## 4. Frontend
+## 4. Unified CentralWatch dashboard
 
-The `frontend/` directory contains the **prebuilt** React SPA bundle. `nginx` serves it at
-`http://localhost:8080` and proxies `/api/*` to the FastAPI backend (same-origin, no CORS).
-Rebuild instructions for the SPA source are outside this repo's scope (only the built bundle
-is tracked); the bundle is built with Vite and expects an axios `baseURL` of `/api`.
+The `frontend/dist/` directory contains the static CentralWatch control plane. `nginx` serves it
+at `http://127.0.0.1:8080`, proxies `/api/*` to FastAPI, and exposes same-origin `/system/*`
+health checks for the Docker services. The dashboard combines live service status, centralized
+proxy registration, authenticated OWASP scans, a permission-gated AWS minimum-security agent,
+embedded Grafana dashboards, and the complete
+demo-app workflow set: authentication, orders, files, notifications, queues, image processing,
+and telemetry simulations. No separate frontend build step is required.
+
+### AWS minimum-security agent
+
+Open `http://127.0.0.1:8080/#aws-security` after signing in. The agent performs a read-only scan of the configured S3 bucket, DynamoDB tables, SQS queue, SNS topic, and Lambda function. It reports minimum-security gaps for public access, encryption, recovery/versioning, and tracing.
+
+The agent does not make changes during a scan. Applying a fix requires the server policy `AWS_SECURITY_AGENT_ALLOW_REMEDIATION=true`, selected failed findings, an explicit dashboard confirmation, `confirm: true`, and the exact acknowledgement `APPLY_SELECTED_REMEDIATIONS`. Production Compose defaults remediation to disabled. See [`AWS_SECURITY_AGENT.md`](AWS_SECURITY_AGENT.md) for the complete baseline, API, IAM permissions, and operational limits.
 
 ## 5. Telemetry contract (what the dashboards query)
 
@@ -137,6 +147,10 @@ is tracked); the bundle is built with Vite and expects an axios `baseURL` of `/a
 | `centralwatch_images_processed_total` | `status` |
 | `centralwatch_notifications_sent_total` | `channel`, `status` |
 | `centralwatch_retry_attempts_total` | `operation` |
+| `centralwatch_security_scans_total` | `environment`, `result` |
+| `centralwatch_security_remediations_total` | `service`, `check_id`, `status` |
+| `centralwatch_proxy_requests_total` | `service`, `method`, `status_code`, `outcome`, `role` |
+| `centralwatch_proxy_request_duration_milliseconds_{bucket,sum,count}` | `service`, `method`, `status_code`, `outcome`, `role` |
 
 > The `environment` label is emitted as **`deployment_environment`** (the collector's
 > `resource_to_telemetry_conversion` copies the app's `deployment.environment` resource
@@ -172,7 +186,7 @@ business spans (`User Registration`, `User Login`, `Order Creation`, `Notificati
 
 ## 6. Grafana dashboards
 
-Six dashboards are provisioned into the **CentralWatch** folder (auto-loading via
+Seven dashboards are provisioned into the **CentralWatch** folder (auto-loading via
 `configs/grafana/provisioning/`):
 
 1. **CentralWatch — Overview** (`overview.json`) — requests/sec, avg/P95/P99 latency, error &
@@ -187,6 +201,8 @@ Six dashboards are provisioned into the **CentralWatch** folder (auto-loading vi
    segments, waterfall.
 6. **CentralWatch — Logs** (`logs.json`) — recent logs, ERROR/WARN streams, logs-by-traceid,
    logs-by-endpoint.
+7. **Security & Threat Intelligence** (`security.json`) — blocked-request metrics, structured
+   security logs, and a link to the authenticated OWASP scan control.
 
 ## 7. Health checks
 
@@ -194,7 +210,7 @@ Six dashboards are provisioned into the **CentralWatch** folder (auto-loading vi
 ./scripts/healthcheck.sh          # all containers + readiness + Prometheus scrape targets
 curl -s http://localhost:8000/healthz    # liveness
 curl -s http://localhost:8000/livez      # liveness
-curl -s http://localhost:8000/readyz     # readiness (checks AWS reachability)
+curl -s http://localhost:8000/readyz     # readiness (checks AWS and proxy database reachability)
 ```
 
 ## 8. Troubleshooting
@@ -232,7 +248,7 @@ curl -s http://localhost:8000/readyz     # readiness (checks AWS reachability)
 │   ├── tempo/tempo.yaml
 │   ├── nginx/frontend.conf
 │   └── grafana/provisioning/    # datasources + 6 dashboards
-├── frontend/dist/               # prebuilt React SPA
+├── frontend/dist/               # unified CentralWatch control-plane dashboard
 ├── scripts/                     # start.sh, stop.sh, healthcheck.sh
 ├── docker-compose.yml           # dev stack (LocalStack)
 ├── docker-compose.aws.yml       # production stack (real AWS)
@@ -244,7 +260,47 @@ curl -s http://localhost:8000/readyz     # readiness (checks AWS reachability)
 We provide an enterprise-grade API Security plugin built as a standalone Python package: `centralwatch-security`. This plugin provides:
 - **Hybrid Security Gateway:** Automatic IP CIDR whitelisting and API Key Revocation checks via a generic middleware.
 - **OWASP ASTF Scanner Trigger:** A built-in FastAPI router to trigger automated OWASP API Top 10 vulnerability scans (`/security-scan`).
+- **Managed API Proxy:** IP/CIDR-authorized upstream requests with server-side Bearer or API-key-header injection (`/proxy`).
 - **Telemetry Integration:** Automatic logging of security violations into OpenTelemetry traces and Loki.
+
+### Managed API proxy
+
+The proxy dashboard is available at `http://127.0.0.1:8080/#proxy`. It registers an
+upstream base URL, secret key, caller allowlist, and service/method role through
+`POST /centralwatch/proxy/keys`. Registration returns a separate proxy access token
+once; CentralWatch stores only its SHA-256 hash. Applications call
+`/centralwatch/proxy/{service}/{path}` with that token in
+`X-CentralWatch-Proxy-Token`, without storing or sending the upstream key.
+`GET /centralwatch/proxy/keys` returns only masked key values and token hints.
+
+The same dashboard displays sanitized API usage history and aggregate totals for
+requests, successes, policy blocks, errors, bytes, methods, status codes, average/P95
+latency, and per-service traffic. OpenTelemetry exports proxy request and duration
+metrics into the existing Prometheus pipeline.
+
+Upstream traffic uses one lifecycle-managed asynchronous HTTP client per application
+worker. Connections are pooled and reused by origin (up to 100 active connections and
+20 idle keep-alive connections, with a 30-second idle expiry), avoiding a new TCP/TLS
+setup for every proxied request. Each service's configured timeout still applies to
+every request, redirects remain disabled, and the pool closes cleanly on shutdown.
+
+Registrations, roles, and token hashes are persisted in CentralWatch's PostgreSQL
+database. Upstream API keys are encrypted with AES-256-GCM in the application before
+they are stored; the encryption key is supplied separately through
+`PROXY_SECRET_ENCRYPTION_KEY`. Sanitized usage history remains in process memory.
+The local demo exposes management without a CentralWatch bearer token so the dashboard
+works immediately. Add administrative authentication before exposing management
+endpoints to a network. See `PROXY_FEATURE_TESTING.md` for the tested Docker workflow,
+key-management requirements, and Docker Desktop loopback behavior.
+
+### Gemini chatbot
+
+Open `http://127.0.0.1:8080/#chat` to configure and use the demo chatbot. The
+predefined `gemini_chat` role permits only POST requests to the `gemini_api`
+service. The Gemini key is stored by CentralWatch, while the demo application
+uses a separate proxy token. CentralWatch injects the key as `x-goog-api-key`
+and returns Gemini's generated text through `POST /chat`. See
+`GEMINI_CHATBOT.md` for setup and security boundaries.
 
 ### Installation
 You can install the plugin in any FastAPI project locally:
@@ -261,14 +317,22 @@ returns success only after ASTF has completed and written a non-empty HTML repor
 The CentralWatch application protects this endpoint with the same bearer-token and
 CIDR enforcement as the other business endpoints:
 
+For the normal dashboard flow, open
+`http://127.0.0.1:8080/#security-scan`, create or sign in to an operator
+session, and select **Trigger security scan**. When it finishes, select
+**Open HTML report**. The Security Grafana dashboard's scan button opens this
+same authenticated control.
+
+The equivalent CLI flow is:
+
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/auth/login \
    -H 'Content-Type: application/json' \
    -d '{"email":"alice@example.com","password":"secret123"}' \
    | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
 
 curl -s -X POST \
-   'http://localhost:8000/centralwatch/security-scan?target_url=http://127.0.0.1:8000' \
+   'http://127.0.0.1:8000/centralwatch/security-scan?target_url=http://127.0.0.1:8000' \
    -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -297,8 +361,10 @@ docker exec centralwatch-demo-app sh -c \
    "test -s /app/reports/security-report.html && echo 'REPORT EXISTS'"
 ```
 
-The report exists inside the container unless you copy it to the host. On Windows,
-run this from the repository root to save it as `D:\API-Monitoring--1\security-report.html`:
+The authenticated dashboard retrieves the report through
+`GET /centralwatch/security-scan/report`. You can also copy it directly from the
+container. On Windows, run this from the repository root to save it as
+`D:\API-Monitoring--1\security-report.html`:
 
 ```powershell
 docker cp centralwatch-demo-app:/app/reports/security-report.html .\security-report.html
