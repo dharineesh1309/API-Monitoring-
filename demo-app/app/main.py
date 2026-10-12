@@ -11,17 +11,17 @@ from contextlib import asynccontextmanager
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from centralwatch_security import SecurityEnforcementMiddleware, proxy_router, security_router
+from centralwatch_security import SecurityEnforcementMiddleware, create_security_router
 
 from .config.settings import get_settings
 from .routes import auth, chat, files, images, notifications, orders, queue, security_agent, simulate
 from .routes.simulate import SimulatedAWSError, SimulatedFailure
 from .services import Container
-from .deps import require_auth
 from .telemetry.instrumentation import configure_telemetry, instrument_app, shutdown_telemetry
 from .telemetry.logging import get_logger, setup_logging
 from .utils.aws import aws_error_response
@@ -214,6 +214,13 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         lifespan=lifespan,
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.settings = settings
 
     # Register the request-logging middleware FIRST, then instrument. Starlette's
@@ -268,13 +275,21 @@ def create_app() -> FastAPI:
     app.include_router(queue.router)
     app.include_router(images.router)
     app.include_router(simulate.router)
-    app.include_router(security_agent.router)
-    app.include_router(chat.router)
-    # Proxy execution and demo key management use their own IP allowlists and
-    # intentionally match the documented no-CentralWatch-token workflow.
-    app.include_router(proxy_router, prefix="/centralwatch")
-    # Security scanning remains protected by the application's bearer token.
-    app.include_router(security_router, prefix="/centralwatch", dependencies=[Depends(require_auth)])
+
+    # Mount the OWASP ASTF scanner endpoint, wired to the app's real auth so the
+    # plugin stays decoupled from demo-app internals (see create_security_router).
+    def resolve_security_token_user(token: str):
+        return app.state.container.auth.get_profile(token)
+
+    app.include_router(
+        create_security_router(
+            get_token_user=resolve_security_token_user,
+            script_path=settings.astf_script_path,
+            report_path=settings.astf_report_path,
+            scan_timeout_seconds=settings.astf_scan_timeout_seconds,
+        ),
+        prefix="/centralwatch",
+    )
 
     @app.get("/", include_in_schema=False)
     async def root():

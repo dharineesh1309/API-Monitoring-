@@ -112,8 +112,10 @@ services:
       - LOCALSTACK_WAIT_TIMEOUT_SECONDS=120
       - SIMULATE_TIMEOUT_SECONDS=${SIMULATE_TIMEOUT_SECONDS:-5}
       - SIMULATE_RETRY_ATTEMPTS=${SIMULATE_RETRY_ATTEMPTS:-3}
-      # Opt in only after reviewing IAM and the production change process.
-      - AWS_SECURITY_AGENT_ALLOW_REMEDIATION=${AWS_SECURITY_AGENT_ALLOW_REMEDIATION:-false}
+      # OWASP ASTF security scanner (paths live inside the demo-app image).
+      - ASTF_SCRIPT_PATH=/scripts/security_scan.sh
+      - ASTF_REPORT_PATH=/app/reports/security-report.html
+      - ASTF_SCAN_TIMEOUT_SECONDS=1800
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)\""]
       interval: 15s
@@ -183,6 +185,11 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       - GF_USERS_ALLOW_SIGN_UP=false
+      # Allows the embedded HTML text panel (Threat Scanner Control Panel) to run
+      # its inline JavaScript, otherwise Grafana strips <script> from text panels.
+      # SECURITY TRADEOFF: this disables HTML sanitization for ALL text panels —
+      # only acceptable because this stack is a controlled dev/demo deployment.
+      - GF_PANELS_DISABLE_SANITIZE_HTML=true
     networks:
       - centralwatch-network
 

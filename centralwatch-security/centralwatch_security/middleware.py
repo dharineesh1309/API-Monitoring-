@@ -1,4 +1,5 @@
 import ipaddress
+import json
 import logging
 from typing import Callable, Awaitable, Optional, Dict, Any
 from fastapi import Request, Response
@@ -43,7 +44,9 @@ class SecurityEnforcementMiddleware(BaseHTTPMiddleware):
 
             if status == "REVOKED":
                 self._log_security_event("TOKEN_REVOKED", request, user_id)
-                return Response(content='{"detail": "API Key has been revoked"}', status_code=403, media_type="application/json")
+                return self._blocked(
+                    request, {"detail": "API Key has been revoked"}
+                )
 
             client_ip_str = request.client.host if request.client else "127.0.0.1"
             try:
@@ -62,9 +65,33 @@ class SecurityEnforcementMiddleware(BaseHTTPMiddleware):
 
             if not is_allowed:
                 self._log_security_event("IP_SUBNET_VIOLATION", request, user_id, str(client_ip))
-                return Response(content='{"detail": "Access denied: IP outside allowed subnet"}', status_code=403, media_type="application/json")
+                return self._blocked(
+                    request, {"detail": "Access denied: IP outside allowed subnet"}
+                )
 
         return await call_next(request)
+
+    @staticmethod
+    def _blocked(request: Request, payload: dict) -> Response:
+        """Build a 403 block response that still carries permissive CORS headers.
+
+        The Gateway middleware is the outermost middleware (added last), so it
+        short-circuits the app's CORSMiddleware: without these headers a browser
+        (e.g. the Grafana scan panel talking to the API from another origin)
+        would see a CORS error instead of the JSON detail.
+        """
+        headers = {}
+        origin = request.headers.get("origin")
+        if origin:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Vary"] = "Origin"
+            headers["Access-Control-Allow-Credentials"] = "true"
+        return Response(
+            content=json.dumps(payload),
+            status_code=403,
+            media_type="application/json",
+            headers=headers,
+        )
 
     def _log_security_event(self, event_type: str, request: Request, user_id: str, client_ip: str = ""):
         extra = {
@@ -76,7 +103,16 @@ class SecurityEnforcementMiddleware(BaseHTTPMiddleware):
         if client_ip:
             extra["client_ip"] = client_ip
 
-        logger.warning(f"Security event triggered: {event_type}", extra=extra)
+        # Log a JSON body so the line is directly parseable in Loki (the OTLP
+        # LoggingHandler records the formatted message as the log body, while the
+        # extra-dict keys are forwarded as log record attributes).
+        payload = {
+            "level": "WARN",
+            "message": "Security event blocked by Gateway",
+            "attributes": dict(extra),
+        }
+
+        logger.warning(json.dumps(payload), extra=extra)
         
         span = trace.get_current_span()
         if span.is_recording():
