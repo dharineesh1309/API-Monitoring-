@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     # an explicit confirmation in the remediation request.
     aws_security_agent_allow_remediation: bool = False
 
+    # --- OWASP ASTF security scanner ------------------------------------------
+    astf_script_path: str = "/scripts/security_scan.sh"
+    astf_report_path: str = "/app/reports/security-report.html"
+    astf_scan_timeout_seconds: int = 1800
+
 
 @lru_cache
 def get_settings() -> Settings:

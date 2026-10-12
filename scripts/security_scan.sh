@@ -9,7 +9,9 @@ TOKEN=${2:-""}
 
 ASTF_JAR="/app/astf-v2.0.1.jar"
 REPORT_DIR="/app/reports"
-
+# Optional report path override (the router passes ASTF_REPORT_PATH so the
+# report the API validates is always the one ASTF actually wrote).
+REPORT_PATH="${3:-$REPORT_DIR/security-report.html}"
 mkdir -p "$REPORT_DIR"
 
 if [ ! -f "$ASTF_JAR" ]; then
@@ -23,7 +25,6 @@ if [ ! -f "$ASTF_JAR" ]; then
 fi
 test -s "$ASTF_JAR"
 
-REPORT_PATH="$REPORT_DIR/security-report.html"
 rm -f "$REPORT_PATH"
 echo "Running ASTF security scan against $TARGET_URL..."
 

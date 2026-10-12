@@ -336,6 +336,17 @@ curl -s -X POST \
    -H "Authorization: Bearer $TOKEN"
 ```
 
+The scanner is configured via environment variables on the `demo-app` service
+(`ASTF_SCRIPT_PATH`, `ASTF_REPORT_PATH`, `ASTF_SCAN_TIMEOUT_SECONDS`); both
+`docker-compose.yml` and `docker-compose.aws.yml` ship sensible defaults.
+
+The **Threat Scanner Control Panel** on the *Security & Threat Intelligence*
+Grafana dashboard does the same thing from the UI: it has a **Trigger Scan**
+button that prompts for an admin bearer token and calls the endpoint. Because
+the panel runs inline JavaScript, Grafana must be started with
+`GF_PANELS_DISABLE_SANITIZE_HTML=true` (set in both compose files) — without it
+the button renders but Grafana strips the `<script>`, so nothing fires.
+
 The report is generated inside the demo-app container at
 `/app/reports/security-report.html`. ASTF exit code `0` means no findings; exit code
 `1` means the scan completed with findings. Both are successful scan executions when
@@ -370,7 +381,7 @@ Get-Content .\security-report.html -TotalCount 20
 In your FastAPI application (`main.py`):
 ```python
 from fastapi import FastAPI, Request
-from centralwatch_security import SecurityEnforcementMiddleware, proxy_router, security_router
+from centralwatch_security import SecurityEnforcementMiddleware, create_security_router
 
 app = FastAPI()
 
@@ -390,12 +401,28 @@ app.add_middleware(
     get_policy_callback=fetch_user_security_policy
 )
 
-# 3. Mount the OWASP Scanner Endpoint
-app.include_router(security_router, prefix="/centralwatch")
+# 3. Mount the OWASP Scanner Endpoint.
+#    create_security_router() keeps the plugin decoupled from your app: pass a
+#    callable that resolves a bearer token to a user (None/falsy => invalid).
+#    The default ASTF paths/timeout come from ASTF_SCRIPT_PATH,
+#    ASTF_REPORT_PATH and ASTF_SCAN_TIMEOUT_SECONDS env vars.
+def resolve_token_user(token: str):
+    return users_service.get_profile(token)  # your auth lookup
 
-# 4. Mount the managed proxy endpoints
-app.include_router(proxy_router, prefix="/centralwatch")
+app.include_router(
+    create_security_router(get_token_user=resolve_token_user),
+    prefix="/centralwatch",
+)
 ```
+> **Backwards compatibility:** a module-level `security_router` is still exported
+> (`from centralwatch_security import security_router`). When used without an
+> explicit resolver it looks for `app.state.container.auth.get_profile(token)` and
+> returns `501` with a clear message if that structure is absent — prefer the
+> factory form above in new integrations.
+
+The scan trigger is **POST-only** (`POST /centralwatch/security-scan?target_url=...`)
+so a browser/prefetch cannot accidentally re-trigger a multi-minute scanner run via
+`GET`. The validated bearer token is forwarded to ASTF for authenticated checks.
 
 ### Testing the Plugin
 To test the plugin locally:

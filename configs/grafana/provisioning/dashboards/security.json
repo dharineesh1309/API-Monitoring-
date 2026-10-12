@@ -112,7 +112,7 @@
       },
       "id": 2,
       "options": {
-        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h2>\ud83d\udee1\ufe0f On-Demand OWASP Security Scan</h2>\n  <p>Run an authenticated ASTF scan and open the generated HTML report from CentralWatch.</p>\n  <br/>\n  <a href=\"http://127.0.0.1:8080/#security-scan\" target=\"_top\" style=\"padding: 10px 20px; background-color: #3274D9; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;\">Open Scan Control</a>\n  <br/><br/>\n  <p><i>The unified dashboard handles operator authentication and submits the required POST request.</i></p>\n</div>",
+        "content": "<div style=\"text-align:center; padding:18px 12px;\">\n  <h2 style=\"margin:0 0 6px;\">🛡️ On-Demand OWASP Security Scan</h2>\n  <p style=\"margin:0 0 14px; font-size:13px;\">Runs the OWASP ASTF scanner in the background against the protected API and writes an HTML report.</p>\n  <button id=\"centralwatch-scan-button\" style=\"padding:10px 24px; background-color:#3274D9; color:#fff; border:none; border-radius:4px; font-weight:600; font-size:14px; cursor:pointer;\">Trigger Scan</button>\n  <div id=\"centralwatch-scan-status\" style=\"margin-top:14px; font-size:13px; line-height:1.5;\"></div>\n  <p style=\"margin-top:12px; font-size:12px; color:#9f9fa7;\"><i>You will be prompted for an admin bearer token (POST /auth/login). This panel runs inline JavaScript and requires <code>GF_PANELS_DISABLE_SANITIZE_HTML=true</code>.</i></p>\n</div>\n<script>\n(function () {\n  var button = document.getElementById('centralwatch-scan-button');\n  var output = document.getElementById('centralwatch-scan-status');\n  function show(msg, color) {\n    if (output) { output.textContent = msg; output.style.color = color || '#9f9fa7'; }\n  }\n  if (!button) {\n    var note = document.getElementById('centralwatch-scan-status');\n    if (note) { note.textContent = 'Control panel inert: inline scripts are blocked. Enable GF_PANELS_DISABLE_SANITIZE_HTML=true and restart Grafana.'; note.style.color = '#e24d42'; }\n    return;\n  }\n  button.addEventListener('click', function () {\n    var token = prompt('Enter a valid admin bearer token (obtain via POST /auth/login)');\n    if (!token) return;\n    button.disabled = true;\n    show('Scan started — ASTF is downloading/running on the API server. This can take several minutes.', '#f5c371');\n    var url = 'http://localhost:8000/centralwatch/security-scan?target_url=' + encodeURIComponent('http://127.0.0.1:8000');\n    fetch(url, {\n      method: 'POST',\n      headers: { 'Authorization': 'Bearer ' + token }\n    }).then(function (resp) {\n      return resp.text().then(function (text) { return { resp: resp, text: text }; });\n    }).then(function (out) {\n      if (out.resp.ok) { show('Scan complete: ' + out.text, '#73ad77'); }\n      else { show('Scan failed (' + out.resp.status + '): ' + out.text, '#e24d42'); }\n    }).catch(function (err) {\n      show('Scan request failed: ' + err.message, '#e24d42');\n    }).finally(function () {\n      button.disabled = false;\n    });\n  });\n})();\n</script>",
         "mode": "html"
       },
       "title": "Threat Scanner Control Panel",
@@ -156,8 +156,8 @@
       "type": "logs"
     }
   ],
-  "refresh": "30s",
-  "schemaVersion": 38,
+  "refresh": "5s",
+  "schemaVersion": 41,
   "style": "dark",
   "tags": [
     "security",
@@ -174,5 +174,5 @@
   "timezone": "",
   "title": "Security & Threat Intelligence",
   "uid": "security",
-  "version": 1
+  "version": 2
 }
