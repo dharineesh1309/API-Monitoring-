@@ -49,9 +49,15 @@ class DynamoDBService:
     def delete_item(self, table: str, key: dict) -> None:
         self.client.delete_item(TableName=table, Key=_to_typed(key))
 
-    def scan(self, table: str, limit: int = 100) -> list[dict]:
-        resp = self.client.scan(TableName=table, Limit=limit)
-        return [_from_typed(item) for item in resp.get("Items", [])]
+    def latest(self, table: str, limit: int) -> list[dict]:
+        """The ``limit`` newest items by ``created_at``, read across every Scan page.
+
+        A single Scan call returns one arbitrary page, so new items could be missing.
+        ponytail: full table scan + sort per request; add a created_at GSI if tables grow large.
+        """
+        pages = self.client.get_paginator("scan").paginate(TableName=table)
+        items = [_from_typed(item) for page in pages for item in page.get("Items", [])]
+        return sorted(items, key=lambda item: item.get("created_at", ""), reverse=True)[:limit]
 
     def query_by_email(self, email: str) -> dict | None:
         """Look up a user by email using the email-index GSI."""

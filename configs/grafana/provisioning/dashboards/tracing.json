@@ -67,7 +67,25 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show in waterfall",
+                    "url": "/d/centralwatch-tracing?${__url_time_range}&${service:queryparam}&var-traceId=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -153,7 +171,25 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show in waterfall",
+                    "url": "/d/centralwatch-tracing?${__url_time_range}&${service:queryparam}&var-traceId=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -206,7 +242,7 @@
         "type": "tempo",
         "uid": "${DS_TEMPO}"
       },
-      "description": "Full waterfall of the trace selected via the $traceId variable. Click any row in the tables above (or in the AWS Services / Business Workflows tables) to fill $traceId, or type a Trace ID directly into the variable.",
+      "description": "Full waterfall of the trace whose ID is in the Trace ID box. Click a Trace ID in any table on this dashboard and choose “Show in waterfall”, or paste a trace ID into the box.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -239,8 +275,8 @@
             "type": "tempo",
             "uid": "${DS_TEMPO}"
           },
-          "query": "{ trace:id = \"${traceId}\" }",
           "queryType": "traceql",
+          "query": "${traceId}",
           "refId": "A"
         }
       ],
@@ -291,7 +327,25 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show in waterfall",
+                    "url": "/d/centralwatch-tracing?${__url_time_range}&${service:queryparam}&var-traceId=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -369,7 +423,25 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Show in waterfall",
+                    "url": "/d/centralwatch-tracing?${__url_time_range}&${service:queryparam}&var-traceId=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -471,19 +543,13 @@
       {
         "current": {
           "selected": false,
-          "text": "00000000000000000000000000000000",
-          "value": "00000000000000000000000000000000"
+          "text": "",
+          "value": ""
         },
         "hide": 0,
         "label": "Trace ID",
         "name": "traceId",
-        "options": [
-          {
-            "selected": false,
-            "text": "00000000000000000000000000000000",
-            "value": "00000000000000000000000000000000"
-          }
-        ],
+        "options": [],
         "query": "",
         "skipUrlSync": false,
         "type": "textbox"

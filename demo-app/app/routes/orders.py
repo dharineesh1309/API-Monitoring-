@@ -38,7 +38,7 @@ def create_order(body: OrderCreate, container: Container = Depends(get_container
 
 @router.get("", response_model=OrderListOut, summary="List orders (DynamoDB scan)")
 def list_orders(container: Container = Depends(get_container)) -> OrderListOut:
-    items = container.dynamodb.scan(container.dynamodb.orders_table, limit=50)
+    items = container.dynamodb.latest(container.dynamodb.orders_table, limit=50)
     orders = [Order.from_item(item) for item in items]
     return OrderListOut(orders=orders, count=len(orders))
 
