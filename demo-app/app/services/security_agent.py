@@ -86,6 +86,16 @@ class AwsSecurityAgent:
         self._latest_scan_id: str | None = None
         self._trend_history: list[dict[str, Any]] = []
         self._lock = RLock()
+        # Checks CentralWatch can fix. Only these are offered as remediable; the rest need a human.
+        self._fixes: dict[str, Callable[[dict[str, Any]], None]] = {
+            "s3_public_access": self._fix_s3_public_access,
+            "s3_default_encryption": self._fix_s3_encryption,
+            "s3_versioning": self._fix_s3_versioning,
+            "dynamodb_pitr": self._fix_dynamodb_pitr,
+            "sqs_encryption": self._fix_sqs_encryption,
+            "sns_encryption": self._fix_sns_encryption,
+            "lambda_tracing": self._fix_lambda_tracing,
+        }
 
     def scan(self) -> dict[str, Any]:
         """Run the minimum-security baseline without changing AWS state."""
@@ -209,19 +219,10 @@ class AwsSecurityAgent:
                     "Only failed, remediable findings can be applied: " + ", ".join(not_actionable)
                 )
 
-            handlers: dict[str, Callable[[dict[str, Any]], None]] = {
-                "s3_public_access": self._fix_s3_public_access,
-                "s3_default_encryption": self._fix_s3_encryption,
-                "s3_versioning": self._fix_s3_versioning,
-                "dynamodb_pitr": self._fix_dynamodb_pitr,
-                "sqs_encryption": self._fix_sqs_encryption,
-                "sns_encryption": self._fix_sns_encryption,
-                "lambda_tracing": self._fix_lambda_tracing,
-            }
             actions: list[dict[str, str]] = []
             for finding in selected:
                 try:
-                    handlers[finding["check_id"]](finding)
+                    self._fixes[finding["check_id"]](finding)
                     action_status = "applied"
                     message = "Baseline configuration applied."
                     logger.warning(
@@ -564,8 +565,8 @@ class AwsSecurityAgent:
             "current_value": str(current_value),
             "desired_value": desired_value,
             "remediation": remediation,
-            "remediable": not passed,
-            "requires_confirmation": not passed,
+            "remediable": not passed and check_id in self._fixes,
+            "requires_confirmation": not passed and check_id in self._fixes,
             "cis_benchmark": cis,
         }
 

@@ -10,7 +10,7 @@ const THEME_KEY = "centralwatch-theme-preference";
 
 const SYSTEMS = [
   { key: "demo", name: "Demo application", purpose: "FastAPI business APIs", endpoint: ":8000", health: "/system/demo", port: "8000", path: "/docs" },
-  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: PROXY_API, view: "proxy" },
+  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: `${API_BASE}${PROXY_API}`, view: "proxy" },
   { key: "grafana", name: "Grafana", purpose: "Dashboards and exploration", endpoint: ":3000", health: "/system/grafana", port: "3000" },
   { key: "prometheus", name: "Prometheus", purpose: "Metrics storage", endpoint: ":9090", health: "/system/prometheus", port: "9090" },
   { key: "loki", name: "Loki", purpose: "Log aggregation", endpoint: ":3100", health: "/system/loki", port: "3100", path: "/ready" },
@@ -427,10 +427,19 @@ function renderSystems(results) {
     <tr><td><strong>${escapeHtml(system.name)}</strong></td><td>${escapeHtml(system.purpose)}</td><td><code>${escapeHtml(system.endpoint)}</code></td><td><span class="status-badge ${system.online ? "success" : "error"}"><i></i>${system.online ? "Online" : "Offline"}</span></td><td><div class="row-actions"><a class="table-button" href="${escapeHtml(systemHref(system))}" ${system.view ? "" : 'target="_blank" rel="noopener"'}>Open</a></div></td></tr>`).join("");
 }
 
+async function usesRealAws() {
+  try {
+    const health = await (await fetch("/system/demo", { cache: "no-store" })).json();
+    return health.aws_mode === "aws";
+  } catch (_) { return false; } // unknown: keep showing every service
+}
+
 async function loadHealth() {
   const button = $("#refresh-health");
   setBusy(button, true, "Checking…");
-  const results = await Promise.all(SYSTEMS.map(checkSystem));
+  // LocalStack only runs in the local development stack; on real AWS it is not part of the system.
+  const systems = await usesRealAws() ? SYSTEMS.filter((system) => system.key !== "localstack") : SYSTEMS;
+  const results = await Promise.all(systems.map(checkSystem));
   renderSystems(results);
   const online = results.filter((item) => item.online).length;
   const telemetryKeys = new Set(["grafana", "prometheus", "loki", "tempo", "collector"]);
@@ -472,7 +481,7 @@ function renderServices() {
 async function handleProxySubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  if (!form.reportValidity()) return;
+  if (!form.reportValidity() || !protectedOrAuth()) return;
   const data = new FormData(form);
   const payload = {
     service_name: data.get("service_name").trim(), base_url: data.get("base_url").trim(), api_key: data.get("api_key"),
@@ -486,7 +495,7 @@ async function handleProxySubmit(event) {
   setBusy(button, true, "Saving…");
   setMessage(message, "");
   try {
-    const result = await apiRequest(PROXY_API, { method: "POST", auth: false, body: payload });
+    const result = await apiRequest(PROXY_API, { method: "POST", body: payload });
     showProxyAccessToken(result.access_token);
     if (payload.service_name === "gemini_api") setGeminiProxyToken(result.access_token);
     $("#input-key").value = "";
@@ -521,7 +530,7 @@ function renderProxyRoles() {
 async function handleProxyRoleSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  if (!form.reportValidity()) return;
+  if (!form.reportValidity() || !protectedOrAuth()) return;
   const data = new FormData(form);
   const payload = {
     role_name: data.get("role_name").trim(),
@@ -533,7 +542,7 @@ async function handleProxyRoleSubmit(event) {
   setBusy(button, true, "Saving…");
   setMessage(message, "");
   try {
-    await apiRequest(PROXY_ROLES_API, { method: "POST", auth: false, body: payload });
+    await apiRequest(PROXY_ROLES_API, { method: "POST", body: payload });
     setMessage(message, `${payload.role_name} is ready to assign to a proxy API.`);
     recordActivity("Proxy role saved", payload.role_name);
     showToast(`Saved proxy role ${payload.role_name}`);
@@ -549,9 +558,10 @@ function showProxyAccessToken(token) {
 }
 
 async function rotateProxyAccessToken(serviceName, button) {
+  if (!protectedOrAuth()) return;
   setBusy(button, true, "Rotating…");
   try {
-    const result = await apiRequest(`${PROXY_API}/${encodeURIComponent(serviceName)}/rotate-token`, { method: "POST", auth: false });
+    const result = await apiRequest(`${PROXY_API}/${encodeURIComponent(serviceName)}/rotate-token`, { method: "POST" });
     showProxyAccessToken(result.access_token);
     if (serviceName === "gemini_api") setGeminiProxyToken(result.access_token);
     recordActivity("Proxy token rotated", serviceName);
@@ -653,7 +663,7 @@ async function loadGeminiStatus() {
 async function configureGemini(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  if (!form.reportValidity()) return;
+  if (!form.reportValidity() || !protectedOrAuth()) return;
   const button = $("#configure-gemini");
   const message = $("#gemini-config-message");
   const apiKey = $("#gemini-api-key").value;
@@ -662,7 +672,6 @@ async function configureGemini(event) {
   try {
     const result = await apiRequest(PROXY_API, {
       method: "POST",
-      auth: false,
       body: {
         service_name: "gemini_api",
         base_url: "https://generativelanguage.googleapis.com/v1beta",
@@ -930,6 +939,130 @@ async function applyAwsSecurityFindings() {
     recordActivity("AWS remediation failed", error.message, "error");
     showToast(error.message, true);
   } finally { setBusy(button, false); updateAwsAgentSelection(); }
+}
+
+function apiScanTrigger(trigger = {}) {
+  if (trigger.type === "cloudtrail") return `Rescanned automatically after CloudTrail recorded ${trigger.events.map((event) => `${event.event} by ${event.user} in ${event.region}`).join("; ")}.`;
+  if (trigger.type === "startup") return "Scanned automatically when the app started.";
+  return trigger.probe ? "Manual scan with live probe." : "Manual scan.";
+}
+
+function renderApiInventory(inventory) {
+  state.apiInventory = inventory;
+  const { summary } = inventory;
+  $("#api-inventory-meta").textContent = `${summary.total} API${summary.total === 1 ? "" : "s"} in ${summary.regions} regions: ${summary.public} public, ${summary.unauthenticated} with unauthenticated routes. ${apiScanTrigger(inventory.trigger)} ${new Date(inventory.generated_at).toLocaleString()}`;
+  $$("[data-api-report]").forEach((button) => { button.disabled = false; });
+  $("#api-inventory-body").innerHTML = inventory.apis.map((api) => {
+    const open = inventory.findings.filter((finding) => finding.api === api.name && finding.source === api.source && finding.region === api.region
+      && (finding.check === "route_no_auth" || finding.check === "url_no_auth")).length;
+    const auth = api.auth ?? "Set by the application";
+    return `<tr>
+      <td><strong>${escapeHtml(api.source)}</strong><small class="table-detail">${escapeHtml(api.region)}</small></td>
+      <td><strong>${escapeHtml(api.name)}</strong><code>${escapeHtml(api.id)}</code></td>
+      <td>${api.urls.map((url) => `<code>${escapeHtml(url)}</code>`).join("<br>") || "No reachable URL"}</td>
+      <td><span class="status-badge ${api.public && open ? "warning" : "neutral"}"><i></i>${escapeHtml(auth)}</span><small class="table-detail">${api.public ? "Public" : "Not public"}</small></td>
+      <td>${api.routes.length} route${api.routes.length === 1 ? "" : "s"}${open && api.routes.length ? `, <strong>${open} unauthenticated</strong>` : ""}<small class="table-detail">${escapeHtml(api.routes.map((route) => `${route.route} (${route.auth ?? "app"})`).join(", "))}</small></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5">No APIs found in the enabled regions.</td></tr>`;
+  $("#api-inventory-wrap").hidden = false;
+  const counts = summary.findings;
+  $("#api-findings-meta").textContent = `${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low.${summary.probed_requests ? ` Probe sent ${summary.probed_requests} unauthenticated GET requests.` : " Configuration only; tick Probe endpoints to confirm with live requests."} Fixes are suggestions; nothing is changed automatically.`;
+  $("#api-findings-body").innerHTML = inventory.findings.map((finding) => `<tr>
+      <td><span class="severity-label ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span></td>
+      <td><strong>${escapeHtml(finding.api)}</strong><small class="table-detail">${escapeHtml(finding.source)} · ${escapeHtml(finding.region)}</small></td>
+      <td><strong>${escapeHtml(finding.target)}</strong>${finding.confirmed ? ` <span class="status-badge warning"><i></i>Confirmed by probe</span>` : ""}<small class="table-detail">${escapeHtml(finding.evidence)}</small></td>
+      <td>${escapeHtml(finding.owasp)}</td>
+      <td><span class="remediation-copy">${escapeHtml(finding.fix)}</span>${finding.command ? `<code class="table-detail">${escapeHtml(finding.command)}</code>` : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="5">No risky settings found on public APIs.</td></tr>`;
+  $("#api-findings-card").hidden = false;
+  const failed = inventory.errors.map((error) => `${error.source} (${error.region}): ${error.error}`);
+  setMessage($("#api-inventory-message"), failed.length ? `${failed.length} source${failed.length === 1 ? "" : "s"} could not be read. ${failed.join(" · ")}` : "", failed.length > 0);
+}
+
+async function runApiInventory() {
+  if (!protectedOrAuth()) return;
+  const button = $("#run-api-inventory");
+  const probe = $("#api-inventory-probe").checked;
+  setBusy(button, true, probe ? "Crawling and probing..." : "Crawling...");
+  setMessage($("#api-inventory-message"), `Reading every enabled region${probe ? " and sending one unauthenticated GET per readable route" : ""}. No changes are being made.`);
+  try {
+    const inventory = await apiRequest(`/security-agent/api-inventory${probe ? "?probe=true" : ""}`);
+    renderApiInventory(inventory);
+    recordActivity("API inventory", `${inventory.summary.public} public APIs, ${inventory.summary.unauthenticated} unauthenticated`, inventory.summary.unauthenticated ? "warning" : "success");
+  } catch (error) {
+    setMessage($("#api-inventory-message"), error.message, true);
+    showToast(error.message, true);
+  } finally { setBusy(button, false); }
+}
+
+async function loadLatestApiInventory() {
+  if (!state.token || state.apiInventory) return;
+  try {
+    renderApiInventory(await apiRequest("/security-agent/api-inventory/latest"));
+  } catch (error) {
+    if (error.status !== 404) setMessage($("#api-inventory-message"), error.message, true);
+  }
+}
+
+function downloadFile(name, type, content) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  Object.assign(document.createElement("a"), { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadApiReport(format) {
+  if (!state.apiInventory) return;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  if (format === "json") {
+    downloadFile(`centralwatch-api-report-${stamp}.json`, "application/json", JSON.stringify({ inventory: state.apiInventory, deep_test: state.apiDeepTest ?? null }, null, 2));
+    return;
+  }
+  // The tables are already rendered with escaped values, so the report reuses their markup.
+  const section = (title, selector) => {
+    const table = $(selector);
+    return table && !table.closest("[hidden]") ? `<h2>${title}</h2>${table.outerHTML}` : "";
+  };
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CentralWatch API exposure report</title>
+<style>body{font:13px/1.45 system-ui,sans-serif;margin:24px;color:#14171f;background:#fff}table{border-collapse:collapse;width:100%;margin-bottom:28px}th,td{border:1px solid #d5d9e0;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f2f4f7}small,code{display:block;color:#566070;font-size:11px;overflow-wrap:anywhere}.critical,.high{color:#b42318;font-weight:700;text-transform:uppercase}.medium{color:#a15c07;font-weight:700;text-transform:uppercase}.low{color:#566070;text-transform:uppercase}.status-badge i{display:none}</style></head>
+<body><h1>CentralWatch API exposure report</h1><p>${escapeHtml($("#api-inventory-meta").textContent)}</p><p>${escapeHtml($("#api-findings-meta").textContent)}</p>
+${section("Exposed API inventory", "#api-inventory-wrap table")}${section("Findings and fixes", "#api-findings-card table")}${state.apiDeepTest ? `<p>${escapeHtml($("#api-astf-meta").textContent)}</p>` : ""}${section("Deep test (OWASP ASTF)", "#api-astf-wrap table")}</body></html>`;
+  downloadFile(`centralwatch-api-report-${stamp}.html`, "text/html", html);
+}
+
+async function runApiDeepTest() {
+  if (!protectedOrAuth()) return;
+  const approved = window.confirm("Run OWASP ASTF against every allow-listed public API?\n\nIt sends attack traffic: request bursts, injection payloads and state-changing calls (POST/PUT/DELETE). Only run it against APIs you are authorized to test.");
+  if (!approved) return;
+  const button = $("#run-api-astf");
+  setBusy(button, true, "Testing...");
+  setMessage($("#api-astf-message"), "Running ASTF against the allow-listed APIs. This can take a few minutes.");
+  try {
+    const result = await apiRequest("/security-agent/api-astf", { method: "POST" });
+    state.apiDeepTest = result;
+    const { summary } = result;
+    const counts = summary.findings;
+    $("#api-astf-meta").textContent = `Tested ${result.tested.join(", ") || "no APIs"} (${summary.runs} ASTF run${summary.runs === 1 ? "" : "s"}): ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low. ${new Date(result.generated_at).toLocaleString()}`;
+    $("#api-astf-body").innerHTML = result.findings.map((finding) => `<tr>
+      <td><span class="severity-label ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span></td>
+      <td><strong>${escapeHtml(finding.api)}</strong><small class="table-detail">${escapeHtml(finding.source)} · ${escapeHtml(finding.region)}</small></td>
+      <td><strong>${escapeHtml(finding.target)}</strong><small class="table-detail">${escapeHtml(finding.evidence)}</small></td>
+      <td>${escapeHtml(finding.owasp)}</td>
+      <td><span class="remediation-copy">${escapeHtml(finding.fix)}</span></td>
+    </tr>`).join("") || `<tr><td colspan="5">ASTF reported no issues.</td></tr>`;
+    $("#api-astf-wrap").hidden = false;
+    const failed = result.scans.filter((scan) => scan.error).map((scan) => `${scan.api} (${scan.url}): ${scan.error}`);
+    const notes = [];
+    if (!summary.apis) notes.push(`No public API matches the allowlist (${result.allowlist}).`);
+    if (result.skipped.length) notes.push(`Not tested (not allow-listed): ${result.skipped.join(", ")}.`);
+    const ignored = result.scans.reduce((total, scan) => total + (scan.ignored_guessed_paths || 0), 0);
+    if (ignored) notes.push(`Ignored ${ignored} ASTF result${ignored === 1 ? "" : "s"} on guessed paths that are not real routes (a catch-all handler answered them).`);
+    if (failed.length) notes.push(`${failed.length} run${failed.length === 1 ? "" : "s"} failed: ${failed.join(" · ")}`);
+    setMessage($("#api-astf-message"), notes.join(" "), failed.length > 0);
+    recordActivity("ASTF deep test", `${summary.apis} APIs, ${result.findings.length} issues`, result.findings.length ? "warning" : "success");
+  } catch (error) {
+    setMessage($("#api-astf-message"), error.message, true);
+    showToast(error.message, true);
+  } finally { setBusy(button, false); }
 }
 
 async function handleSecurityScan(event) {
@@ -1336,7 +1469,7 @@ async function runSimulation(name, button) {
 function loadViewData(name) {
   if (name === "overview") { loadHealth(); loadServices(); }
   if (name === "proxy") loadProxyWorkspace();
-  if (name === "aws-security" && state.token) loadLatestAwsSecurityScan();
+  if (name === "aws-security" && state.token) { loadLatestAwsSecurityScan(); loadLatestApiInventory(); }
   if (name === "observability") initializeGrafana();
   if (name === "chat") loadGeminiStatus();
   if (name === "orders" && state.token) loadOrders();
@@ -1386,6 +1519,9 @@ function bindEvents() {
   $("#security-scan-form").addEventListener("submit", handleSecurityScan);
   $("#open-security-report").addEventListener("click", openSecurityReport);
   $("#run-aws-security-scan").addEventListener("click", runAwsSecurityScan);
+  $("#run-api-inventory").addEventListener("click", runApiInventory);
+  $("#run-api-astf").addEventListener("click", runApiDeepTest);
+  $$("[data-api-report]").forEach((button) => button.addEventListener("click", () => downloadApiReport(button.dataset.apiReport)));
   $("#select-agent-findings").addEventListener("click", toggleAwsFindingSelection);
   $("#apply-agent-findings").addEventListener("click", applyAwsSecurityFindings);
   $("#aws-findings-body").addEventListener("change", (event) => { if (event.target.matches(".finding-checkbox")) updateAwsAgentSelection(); });

@@ -8,6 +8,7 @@ regional endpoints and the standard credential chain.
 from ..config.settings import Settings
 from ..telemetry.metrics import BusinessMetrics
 from ..utils.aws import build_session
+from .api_watch import ApiWatch
 from .auth_service import AuthService
 from .aws_resources import AwsResourceManager
 from .dynamodb_service import DynamoDBService
@@ -34,6 +35,7 @@ class Container:
         self.lambda_service = LambdaService(self.session, settings, self.s3, self.sns, self.metrics)
         self.auth = AuthService(settings, self.dynamodb)
         self.security_agent = AwsSecurityAgent(self.session, settings, self.metrics)
+        self.api_watch = ApiWatch(self.session, settings, self.metrics)
 
     def close(self) -> None:
         if hasattr(self.session, "close"):

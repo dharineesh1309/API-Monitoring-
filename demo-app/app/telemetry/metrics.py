@@ -50,3 +50,19 @@ class BusinessMetrics:
             description="Total number of permission-gated AWS security remediations",
             unit="1",
         )
+        # API exposure scanner. Brace units keep the Prometheus exporter from adding a unit suffix.
+        self.api_exposure_apis = meter.create_gauge(
+            "api_exposure.apis",
+            description="APIs in the AWS account at the last scan, by exposure (total/public/unauthenticated)",
+            unit="{api}",
+        )
+        self.api_exposure_findings = meter.create_gauge(
+            "api_exposure.findings",
+            description="API exposure findings at the last scan, by severity",
+            unit="{finding}",
+        )
+        self.api_exposure_rescans = meter.create_counter(
+            "api_exposure.rescans_total",
+            description="API exposure scans, by trigger (manual/startup/cloudtrail)",
+            unit="{scan}",
+        )

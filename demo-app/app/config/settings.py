@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     astf_script_path: str = "/scripts/security_scan.sh"
     astf_report_path: str = "/app/reports/security-report.html"
     astf_scan_timeout_seconds: int = 1800
+    # Comma-separated name patterns of AWS APIs the deep test may send attack traffic to.
+    api_scan_allowlist: str = "cw-lab-*"
+    # How often to check CloudTrail for API changes and rescan (real AWS only; 0 turns it off).
+    api_rescan_interval_seconds: int = 300
 
 
 @lru_cache

@@ -1,38 +1,36 @@
 name: CI
 
+# Every branch and pull request, so a merge cannot quietly break the suites.
 on:
   push:
-    branches:
-      - main
-      - develop
   pull_request:
 
 jobs:
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    env:
+      # Both suites are self-contained: AWS, PostgreSQL, DNS and ASTF are faked.
+      AUTH_TOKEN_SECRET: ci-only-not-a-secret
+      OTEL_SDK_DISABLED: "true"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.11 (same as the demo-app image)
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
-      - name: Install centralwatch-security and test deps
-        run: pip install -e "./centralwatch-security[dev]" pytest pytest-asyncio httpx
+      - name: Install the demo-app, the centralwatch-security plugin and pytest
+        run: pip install -r demo-app/requirements.txt -e ./centralwatch-security pytest
 
       - name: Run centralwatch-security tests
         run: pytest centralwatch-security/tests/ -v --tb=short
 
-      - name: Install demo-app test dependencies
-        run: pip install fastapi httpx pytest pytest-asyncio
-
       - name: Run demo-app tests
         run: pytest demo-app/tests/ -v --tb=short
-        continue-on-error: true  # May require live services
 
   docker-build:
     name: Docker Build

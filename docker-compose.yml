@@ -113,6 +113,8 @@ services:
       - ASTF_SCRIPT_PATH=/scripts/security_scan.sh
       - ASTF_REPORT_PATH=/app/reports/security-report.html
       - ASTF_SCAN_TIMEOUT_SECONDS=1800
+      # AWS APIs (name patterns) the deep test may send attack traffic to. Only list APIs you may test.
+      - API_SCAN_ALLOWLIST=${API_SCAN_ALLOWLIST:-cw-lab-*}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)\""]
       interval: 15s

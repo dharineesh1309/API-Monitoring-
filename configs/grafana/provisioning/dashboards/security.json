@@ -154,6 +154,69 @@
       ],
       "title": "Live Threat Intelligence Log Stream",
       "type": "logs"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "APIs in the AWS account at the last scan (manual, startup, or after a CloudTrail change).",
+      "fieldConfig": {
+        "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" }, "decimals": 0, "mappings": [], "unit": "none" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "unauthenticated" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (exposure) (centralwatch_api_exposure_apis{exposure=~\"public|unauthenticated\"})", "legendFormat": "{{exposure}}", "refId": "A" }
+      ],
+      "title": "Exposed AWS APIs",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Findings on public APIs at the last scan. Fixes are listed on the CentralWatch AWS security agent page.",
+      "fieldConfig": {
+        "defaults": { "color": { "fixedColor": "text", "mode": "fixed" }, "decimals": 0, "mappings": [], "min": 0, "unit": "none" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "fixedColor": "dark-red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
+      "id": 5,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (severity) (centralwatch_api_exposure_findings)", "legendFormat": "{{severity}}", "refId": "A" }
+      ],
+      "title": "API Findings by Severity",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "API exposure scans in the last 24 hours, by what started them.",
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "purple", "mode": "fixed" }, "decimals": 0, "mappings": [], "unit": "none" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "round(sum by (trigger) (increase(centralwatch_api_exposure_rescans_total[24h])))", "legendFormat": "{{trigger}}", "refId": "A" }
+      ],
+      "title": "API Scans (24h) by Trigger",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "description": "CloudTrail events that triggered a rescan, and APIs that newly lost authentication.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "id": 7,
+      "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
+      "targets": [
+        { "datasource": { "type": "loki", "uid": "loki" }, "editorMode": "code", "expr": "{job=\"centralwatch-demo-app\"} |= `API exposure` | json message=\"body\" | line_format `{{.message}}`", "queryType": "range", "refId": "A" }
+      ],
+      "title": "API Exposure Events (CloudTrail Rescans, Newly Exposed APIs)",
+      "type": "logs"
     }
   ],
   "refresh": "5s",

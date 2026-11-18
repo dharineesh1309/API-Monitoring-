@@ -51,6 +51,8 @@ async def chat_with_gemini(
 ):
     """Use a proxy token while keeping the Gemini API key inside CentralWatch."""
 
+    if not proxy_token:
+        raise HTTPException(status_code=403, detail="A CentralWatch Gemini proxy token is required.")
     port = request.app.state.settings.port
     proxy_url = (
         f"http://127.0.0.1:{port}/centralwatch/proxy/gemini_api/"
@@ -65,23 +67,17 @@ async def chat_with_gemini(
         ]
     }
 
-    headers = {}
-    if proxy_token:
-        headers["X-CentralWatch-Proxy-Token"] = proxy_token
-
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 proxy_url,
                 json=gemini_body,
-                headers=headers,
+                headers={"X-CentralWatch-Proxy-Token": proxy_token},
                 timeout=70.0,
             )
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="The CentralWatch Gemini request timed out.") from exc
     except httpx.RequestError as exc:
-        if not proxy_token:
-            raise HTTPException(status_code=403, detail="A CentralWatch Gemini proxy token is required.") from exc
         raise HTTPException(status_code=502, detail="CentralWatch could not be reached.") from exc
 
     try:

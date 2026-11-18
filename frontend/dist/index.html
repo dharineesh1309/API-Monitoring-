@@ -190,6 +190,20 @@
                 <p class="form-message" id="aws-agent-message" role="status"></p>
               </article>
             </div>
+            <article class="card agent-findings-card">
+              <div class="card-header stack-mobile"><div><h2>Exposed API inventory</h2><p id="api-inventory-meta">Finds every API in the account: API Gateway, Lambda function URLs, AppSync, CloudFront, load balancers and public EC2, in every enabled region, and flags risky settings. Read-only.</p></div><div class="button-row"><label class="probe-option"><input class="finding-checkbox" id="api-inventory-probe" type="checkbox">Probe endpoints (one GET per route, no credentials)</label><button class="button ghost compact" type="button" data-api-report="html" disabled>Download report</button><button class="button ghost compact" type="button" data-api-report="json" disabled>JSON</button><button class="button primary compact" id="run-api-inventory" type="button">Crawl APIs</button></div></div>
+              <div class="table-wrap" id="api-inventory-wrap" hidden><table><thead><tr><th>Type</th><th>API</th><th>Endpoints</th><th>Authentication</th><th>Routes</th></tr></thead><tbody id="api-inventory-body"></tbody></table></div>
+              <p class="form-message" id="api-inventory-message" role="status"></p>
+            </article>
+            <article class="card agent-findings-card" id="api-findings-card" hidden>
+              <div class="card-header stack-mobile"><div><h2>API findings and fixes</h2><p id="api-findings-meta"></p></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Risk level</th><th>API</th><th>Finding</th><th>OWASP API Top 10</th><th>Recommended fix</th></tr></thead><tbody id="api-findings-body"></tbody></table></div>
+            </article>
+            <article class="card agent-findings-card">
+              <div class="card-header stack-mobile"><div><h2>Deep test (OWASP ASTF)</h2><p id="api-astf-meta">Runs the OWASP API Security Testing Framework against each public API whose name matches the server allowlist (API_SCAN_ALLOWLIST, default cw-lab-*), using the API's real routes. ASTF sends attack traffic, including request bursts and state-changing calls.</p></div><div class="button-row"><button class="button primary compact" id="run-api-astf" type="button">Run deep test</button></div></div>
+              <div class="table-wrap" id="api-astf-wrap" hidden><table><thead><tr><th>Risk level</th><th>API</th><th>Endpoint and issue</th><th>OWASP API Top 10</th><th>Recommended fix</th></tr></thead><tbody id="api-astf-body"></tbody></table></div>
+              <p class="form-message" id="api-astf-message" role="status"></p>
+            </article>
           </div>
         </section>
 

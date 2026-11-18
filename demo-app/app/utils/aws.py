@@ -51,8 +51,10 @@ def client_config(**overrides) -> botocore.config.Config:
     return botocore.config.Config(**config)
 
 
-def make_client(session: boto3.session.Session, service: str, settings: Settings, read_timeout: int = 30):
-    """Create a boto3 client.
+def make_client(
+    session: boto3.session.Session, service: str, settings: Settings, read_timeout: int = 30, region: str | None = None
+):
+    """Create a boto3 client (in ``region`` when given, else the session's region).
 
     - ``endpoint_url`` is only set when explicitly configured (LocalStack);
       when empty the SDK uses the AWS default regional endpoints.
@@ -61,6 +63,8 @@ def make_client(session: boto3.session.Session, service: str, settings: Settings
       ``path`` (required for LocalStack-style custom endpoints).
     """
     kwargs: dict = {"config": client_config(read_timeout=read_timeout)}
+    if region:
+        kwargs["region_name"] = region
     if settings.aws_endpoint_url:
         kwargs["endpoint_url"] = settings.aws_endpoint_url
     if service == "s3" and settings.aws_s3_addressing_style not in ("", "auto"):

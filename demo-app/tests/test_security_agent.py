@@ -107,6 +107,35 @@ class LambdaClient:
         self.state["tracing"] = True
 
 
+class CloudTrailClient:
+    def describe_trails(self):
+        return {"trailList": []}
+
+
+class IamClient:
+    def get_account_summary(self):
+        return {"SummaryMap": {"AccountAccessKeysPresent": 1}}
+
+
+class Ec2Client:
+    def describe_security_groups(self):
+        return {"SecurityGroups": [{"GroupId": "sg-open", "IpPermissions": [
+            {"FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]},
+        ]}]}
+
+
+class KmsClient:
+    def list_keys(self):
+        return {"Keys": [{"KeyId": "key-1"}]}
+
+    def get_key_rotation_status(self, KeyId):
+        return {"KeyRotationEnabled": False}
+
+
+# Account-level checks CentralWatch reports but cannot fix by itself.
+MANUAL_CHECKS = {"cloudtrail_enabled", "iam_root_credentials", "sg_open_ingress", "kms_key_rotation"}
+
+
 @pytest.fixture
 def agent_factory(monkeypatch):
     state = {
@@ -131,6 +160,10 @@ def agent_factory(monkeypatch):
         "sqs": SqsClient(state["sqs"]),
         "sns": SnsClient(state["sns"]),
         "lambda": LambdaClient(state["lambda"]),
+        "cloudtrail": CloudTrailClient(),
+        "iam": IamClient(),
+        "ec2": Ec2Client(),
+        "kms": KmsClient(),
     }
     monkeypatch.setattr(security_agent_module, "make_client", lambda _session, service, _settings: clients[service])
 
@@ -159,13 +192,15 @@ def test_scan_is_read_only_and_reports_the_full_baseline(agent_factory):
     result = agent.scan()
 
     assert result["summary"] == {
-        "total": 9,
+        "total": 13,
         "passed": 0,
-        "failed": 9,
+        "failed": 13,
         "unavailable": 0,
         "errors": 0,
         "remediable": 9,
+        "compliance_score": 0.0,
     }
+    assert {f["check_id"] for f in result["findings"] if not f["remediable"]} == MANUAL_CHECKS
     assert state["s3"]["encryption"] is False
     assert state["dynamodb"]["users"] is False
     assert state["sqs"]["encrypted"] is False
@@ -187,6 +222,8 @@ def test_remediation_requires_server_policy_and_exact_confirmation(agent_factory
         enabled.remediate(enabled_scan["scan_id"], [enabled_scan["findings"][0]["finding_id"]], False, ACKNOWLEDGEMENT)
     with pytest.raises(PermissionError, match="Explicit confirmation"):
         enabled.remediate(enabled_scan["scan_id"], [enabled_scan["findings"][0]["finding_id"]], True, "wrong")
+    with pytest.raises(ValueError, match="remediable"):  # no automatic fix exists for this check
+        enabled.remediate(enabled_scan["scan_id"], ["cloudtrail_enabled:AWS CloudTrail"], True, ACKNOWLEDGEMENT)
 
 
 def test_only_selected_findings_are_applied_and_then_rescanned(agent_factory):

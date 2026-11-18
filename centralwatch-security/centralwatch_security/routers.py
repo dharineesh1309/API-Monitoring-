@@ -34,6 +34,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from opentelemetry import metrics
 from pydantic import BaseModel, Field, field_validator
 
@@ -1444,7 +1445,25 @@ async def api_proxy(
 # ---------------------------------------------------------------------------
 # OWASP ASTF Security Scanner Router
 # ---------------------------------------------------------------------------
-security_router = APIRouter(tags=["Security"])
+async def _require_user(authorization: str, get_token_user: Optional[Callable[[str], Optional[Any]]]) -> str:
+    """Return the bearer token once the host confirms it belongs to a user. Fails closed."""
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    if get_token_user is None:
+        raise HTTPException(
+            status_code=501,
+            detail="Security scan routes have no token resolver. Build them with create_security_router(get_token_user=...).",
+        )
+    try:
+        user = await to_thread(get_token_user, token)  # host auth may do blocking I/O (e.g. a DynamoDB lookup)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any resolver failure means the caller is not authenticated
+        raise HTTPException(status_code=401, detail="Invalid or expired bearer token") from exc
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired bearer token")
+    return token
 
 
 def create_security_router(
@@ -1453,7 +1472,11 @@ def create_security_router(
     report_path: Optional[str] = None,
     scan_timeout_seconds: Optional[int] = None,
 ) -> APIRouter:
-    """Build the OWASP ASTF security scanner router."""
+    """Build the OWASP ASTF security scanner router.
+
+    ``get_token_user(token)`` must return the user for a valid bearer token (or None / raise).
+    Both routes require it: the scan launches attack traffic, and the report lists vulnerabilities.
+    """
     router = APIRouter(tags=["Security"])
 
     @router.post("/security-scan")
@@ -1462,9 +1485,7 @@ def create_security_router(
         request: Request,
         authorization: str = Header(default=""),
     ) -> dict:
-        token = authorization.removeprefix("Bearer ").strip()
-        if not token:
-            raise HTTPException(status_code=401, detail="Missing bearer token")
+        token = await _require_user(authorization, get_token_user)
 
         resolved_script = script_path or os.environ.get("ASTF_SCRIPT_PATH", "/scripts/security_scan.sh")
         if not os.path.exists(resolved_script):
@@ -1487,11 +1508,16 @@ def create_security_router(
             raise HTTPException(status_code=504, detail="Security scan timed out.") from None
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"Failed to execute security scan: {exc}") from exc
+        if result.returncode not in (0, 1):  # ASTF: 0 = clean, 1 = findings, anything else = the scan failed
+            logger.error("Security scan failed: target_url=%s exit_code=%d", target_url, result.returncode)
+            raise HTTPException(status_code=502, detail=f"ASTF security scan failed with exit code {result.returncode}.")
 
         try:
             report_size = os.path.getsize(resolved_report)
         except OSError as exc:
             raise HTTPException(status_code=502, detail="ASTF scan completed without generating a report.") from exc
+        if report_size == 0:
+            raise HTTPException(status_code=502, detail="ASTF scan generated an empty report.")
 
         return {
             "status": "Scan complete",
@@ -1502,11 +1528,21 @@ def create_security_router(
         }
 
     @router.get("/security-scan/report")
-    async def get_security_report():
+    async def get_security_report(authorization: str = Header(default="")):
+        """Return the latest ASTF HTML report, shown inline in the dashboard."""
+        await _require_user(authorization, get_token_user)
         resolved_report = report_path or os.environ.get("ASTF_REPORT_PATH", "/app/reports/security-report.html")
-        if not os.path.exists(resolved_report):
-            raise HTTPException(status_code=404, detail="No security report generated yet.")
-        from fastapi.responses import FileResponse
-        return FileResponse(resolved_report, media_type="text/html")
+        try:
+            report_size = os.path.getsize(resolved_report)
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail="No security scan report is available yet.") from exc
+        if report_size == 0:
+            raise HTTPException(status_code=404, detail="The latest security scan report is empty.")
+        return FileResponse(
+            resolved_report,
+            media_type="text/html",
+            filename="centralwatch-security-report.html",
+            content_disposition_type="inline",
+        )
 
     return router

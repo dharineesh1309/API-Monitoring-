@@ -96,6 +96,24 @@ async def _reconcile_loop(container: Container) -> None:
             logger.exception("AWS resource reconciliation failed; will retry")
 
 
+async def _api_watch_loop(container: Container) -> None:
+    """Scan API exposure at startup, then rescan whenever CloudTrail shows an API change."""
+    watch = container.api_watch
+    try:
+        await asyncio.to_thread(watch.poll_cloudtrail)  # mark recent events seen; the startup scan covers them
+        await asyncio.to_thread(watch.rescan, "startup")
+    except Exception:
+        logger.exception("Startup API exposure scan failed; CloudTrail polling continues")
+    while True:
+        await asyncio.sleep(container.settings.api_rescan_interval_seconds)
+        try:
+            events = await asyncio.to_thread(watch.poll_cloudtrail)
+            if events:
+                await asyncio.to_thread(watch.rescan, "cloudtrail", events)
+        except Exception:
+            logger.exception("CloudTrail-triggered API exposure rescan failed; will retry")
+
+
 async def _lambda_warmup(container: Container) -> None:
     """Warm the Lambda runtime in the background (first invocation may pull an image)."""
     await asyncio.sleep(8)
@@ -157,6 +175,11 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("PostgresProxyStore initialization deferred/unavailable: %s", exc)
 
+    # CloudTrail Event History exists only on real AWS (LocalStack needs Pro for it).
+    api_watch_task: asyncio.Task | None = None
+    if not container.initializer.is_localstack and settings.api_rescan_interval_seconds > 0:
+        api_watch_task = asyncio.create_task(_api_watch_loop(container))
+
     http_client = getattr(app.state, "centralwatch_proxy_http_client", None)
     owns_http_client = http_client is None
     if owns_http_client:
@@ -176,17 +199,15 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-    if reconcile_task is not None:
-        reconcile_task.cancel()
-    if warmup_task is not None:
-        warmup_task.cancel()
-    try:
-        if reconcile_task is not None:
-            await reconcile_task
-        if warmup_task is not None:
-            await warmup_task
-    except asyncio.CancelledError:
-        pass
+    for task in (reconcile_task, warmup_task, api_watch_task):
+        if task is not None:
+            task.cancel()
+    for task in (reconcile_task, warmup_task, api_watch_task):
+        try:
+            if task is not None:
+                await task
+        except asyncio.CancelledError:
+            pass
     shutdown_telemetry()
     container.close()
     logger.info("CentralWatch demo app stopped")
@@ -335,7 +356,12 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["health"])
     async def healthz(request: Request):
         s = request.app.state.settings
-        return {"status": "ok", "service": s.service_name, "version": s.service_version}
+        return {
+            "status": "ok",
+            "service": s.service_name,
+            "version": s.service_version,
+            "aws_mode": "localstack" if s.aws_endpoint_url else "aws",  # lets the dashboard hide LocalStack on real AWS
+        }
 
     @app.get("/livez", tags=["health"])
     async def livez():

@@ -1,5 +1,7 @@
 """Contract tests for CentralWatch's managed API proxy."""
 
+import base64
+import socket
 from copy import deepcopy
 
 import httpx
@@ -21,6 +23,9 @@ class InMemoryProxyStore:
         self.services = {}
         self.roles = {}
         self.closed = False
+        self.quarantined = {}
+        self.audit_logs = []
+        self.usage_events = []
 
     async def start(self, default_services, default_roles):
         for name, service in deepcopy(default_services).items():
@@ -44,12 +49,13 @@ class InMemoryProxyStore:
     async def upsert_service(self, service):
         self.services[service["service_name"]] = deepcopy(service)
 
-    async def update_service_token(self, service_name, token_hash, token_hint):
+    async def update_service_token(self, service_name, token_hash, token_hint, expires_at=None):
         service = self.services.get(service_name)
         if not service:
             return False
         service["token_hash"] = token_hash
         service["token_hint"] = token_hint
+        service["token_expires_at"] = expires_at
         return True
 
     async def list_roles(self):
@@ -62,13 +68,70 @@ class InMemoryProxyStore:
     async def upsert_role(self, role):
         self.roles[role["role_name"]] = deepcopy(role)
 
+    async def get_role_by_token_hash(self, token_hash):
+        return next((deepcopy(role) for role in self.roles.values() if role.get("token_hash") == token_hash), None)
+
+    # The real store encrypts with AES-GCM; these tests only need an opaque, reversible round trip.
+    def encrypt_role_token(self, name, token):
+        return base64.b64encode(f"{name}:{token}".encode()[::-1])
+
+    def decrypt_role_token(self, name, envelope):
+        return base64.b64decode(envelope)[::-1].decode().removeprefix(f"{name}:")
+
+    encrypt_service_token = encrypt_role_token
+    decrypt_service_token = decrypt_role_token
+
+    async def rotate_master_encryption_key(self, new_encoded_key):
+        return len(self.services) + len(self.roles)
+
+    def is_ip_quarantined(self, ip_address):
+        return ip_address in self.quarantined
+
+    async def unblock_ip(self, ip_address):
+        return self.quarantined.pop(ip_address, None) is not None
+
+    async def list_quarantined_ips(self):
+        return [deepcopy(entry) for entry in self.quarantined.values()]
+
+    async def record_audit_log(self, action, actor_id, actor_email, client_ip, service_name, details):
+        entry = {"action": action, "actor_id": actor_id, "actor_email": actor_email,
+                 "client_ip": client_ip, "service_name": service_name, "details": deepcopy(details)}
+        self.audit_logs.append(entry)
+        return deepcopy(entry)
+
+    async def list_audit_logs(self, limit=100):
+        return deepcopy(self.audit_logs[::-1][:limit])
+
+    async def record_usage_event(self, record):
+        self.usage_events.append(deepcopy(record))
+
 
 @pytest.fixture(autouse=True)
-def restore_service_registry():
+def restore_service_registry(monkeypatch):
+    # The response cache, rate limiter and circuit breaker are module-level; give every test fresh ones
+    # so one test's cached upstream reply cannot answer the next test's request.
+    monkeypatch.setattr(routers, "_response_cache", routers.SimpleResponseCache())
+    monkeypatch.setattr(routers, "_rate_limiter", routers.ProxyRateLimiter())
+    monkeypatch.setattr(routers, "_circuit_breaker", routers.CircuitBreaker())
     original_history = deepcopy(PROXY_USAGE_HISTORY)
     yield
     PROXY_USAGE_HISTORY.clear()
     PROXY_USAGE_HISTORY.extend(original_history)
+
+
+PUBLIC_IP = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def fake_dns(monkeypatch):
+    """The SSRF check resolves upstream hosts; answer with a public IP so tests need no network."""
+    answers = {}
+
+    def getaddrinfo(host, *_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (answers.get(host, PUBLIC_IP), 0))]
+
+    monkeypatch.setattr(routers.socket, "getaddrinfo", getaddrinfo)
+    return answers
 
 
 @pytest.fixture
@@ -321,6 +384,7 @@ def test_proxy_denies_ip_outside_allowlist_before_upstream_call(monkeypatch):
     app.state.centralwatch_proxy_http_client = ShouldNotBeCalled()
 
     with TestClient(app) as test_client:
+        app.state.centralwatch_proxy_store.services["mock_service"]["allowed_ips"] = ["127.0.0.1", "::1"]
         response = test_client.get(
             "/centralwatch/proxy/mock_service/users/1",
             headers={"X-CentralWatch-Proxy-Token": "cw_proxy_demo_mock"},
@@ -337,12 +401,25 @@ def test_forwarded_for_cannot_spoof_an_allowlisted_ip(monkeypatch):
     app.state.centralwatch_proxy_store = InMemoryProxyStore()
     app.include_router(proxy_router, prefix="/centralwatch")
     with TestClient(app) as test_client:
+        app.state.centralwatch_proxy_store.services["mock_service"]["allowed_ips"] = ["127.0.0.1", "::1"]
         response = test_client.get(
             "/centralwatch/proxy/mock_service/users/1",
-            headers={"X-Forwarded-For": "127.0.0.1"},
+            headers={"X-Forwarded-For": "127.0.0.1", "X-CentralWatch-Proxy-Token": "cw_proxy_demo_mock"},
         )
 
     assert response.status_code == 403
+    assert response.json()["detail"] == "Your IP is not authorized to use this service."
+
+
+def test_proxy_blocks_upstreams_that_resolve_to_internal_addresses(client, fake_dns):
+    fake_dns["metadata.attacker.example"] = "169.254.169.254"  # cloud instance-metadata address
+    store = client.app.state.centralwatch_proxy_store
+    store.services["mock_service"]["base_url"] = "https://metadata.attacker.example"
+
+    response = client.get("/centralwatch/proxy/mock_service/latest", headers={"X-CentralWatch-Proxy-Token": "cw_proxy_demo_mock"})
+
+    assert response.status_code == 400
+    assert "SSRF" in response.json()["detail"]
 
 
 def test_opt_in_docker_gateway_maps_to_loopback(monkeypatch):

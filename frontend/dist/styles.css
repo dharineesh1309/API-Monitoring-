@@ -299,10 +299,12 @@ input[type="file"] { height: auto; min-height: 36px; padding: 6px; }
 .agent-findings-card td:nth-child(6), .agent-findings-card td:nth-child(7) { min-width: 230px; }
 .select-column { width: 38px; text-align: center; }
 .finding-checkbox { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.probe-option { display: flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 11px; cursor: pointer; }
 .table-detail { display: block; max-width: 48ch; margin-top: 4px; color: var(--muted); font-size: 10px; font-weight: 400; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .agent-findings-card td > code { display: block; margin-top: 4px; color: var(--muted); overflow-wrap: anywhere; }
 .severity-label { color: var(--muted-strong); font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .severity-label.high { color: var(--danger); }
+.severity-label.critical { color: var(--danger); text-decoration: underline; }
 .severity-label.medium { color: var(--warning); }
 .risk-copy { color: var(--text); font-size: 11px; line-height: 1.5; }
 .remediation-copy { color: var(--muted-strong); font-size: 11px; line-height: 1.4; }
