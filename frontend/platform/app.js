@@ -1526,13 +1526,32 @@ async function runSimulation(name, button) {
   } finally { setBusy(button, false); }
 }
 
-function loadObsFrame(viewName) {
+async function fetchLatestTraceId() {
+  try {
+    const res = await fetch("/system/tempo/api/search?limit=1", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.traces?.[0]?.traceID || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function loadObsFrame(viewName) {
   const section = $(`[data-view="${viewName}"]`);
   if (!section) return;
   const frame = $(".obs-frame", section);
   if (!frame) return;
   if (!frame.src || frame.src === "about:blank" || frame.src.endsWith("#") || !frame.src.includes("http")) {
-    frame.src = grafanaUrl(frame.dataset.src);
+    let src = frame.dataset.src;
+    if (viewName === "obs-aws" || viewName === "obs-traces") {
+      const latestTraceId = await fetchLatestTraceId();
+      if (latestTraceId && !src.includes("var-traceId=")) {
+        const sep = src.includes("?") ? "&" : "?";
+        src = `${src}${sep}var-traceId=${latestTraceId}`;
+      }
+    }
+    frame.src = grafanaUrl(src);
   }
 }
 
@@ -1831,9 +1850,18 @@ function bindEvents() {
   on("#image-form", "submit", handleImageProcess);
   $$("[data-simulation]").forEach((button) => button.addEventListener("click", () => runSimulation(button.dataset.simulation, button)));
   on("#refresh-alerts", "click", loadAlerts);
-  $$(".reload-frame").forEach((btn) => btn.addEventListener("click", () => {
+  $$(".reload-frame").forEach((btn) => btn.addEventListener("click", async () => {
     const frame = $(`#${btn.dataset.frameTarget}`);
-    if (frame) frame.src = `${grafanaUrl(frame.dataset.src)}&_=${Date.now()}`;
+    if (!frame) return;
+    let src = frame.dataset.src;
+    if (frame.id === "frame-aws" || frame.id === "frame-traces") {
+      const latestTraceId = await fetchLatestTraceId();
+      if (latestTraceId && !src.includes("var-traceId=")) {
+        const sep = src.includes("?") ? "&" : "?";
+        src = `${src}${sep}var-traceId=${latestTraceId}`;
+      }
+    }
+    frame.src = `${grafanaUrl(src)}&_=${Date.now()}`;
   }));
 }
 

@@ -175,7 +175,14 @@
           }
         }
 
-        const data = await res.json();
+        let data = {};
+        try {
+          data = await res.json();
+        } catch (_) {
+          if (!res.ok) {
+            throw new Error(`Server temporarily unavailable (${res.status} ${res.statusText || "Gateway Error"}). Please retry in a few seconds.`);
+          }
+        }
         if (!res.ok) {
           throw new Error(data.detail || data.error || "Invalid operator credentials");
         }

@@ -369,7 +369,11 @@ class PostgresProxyStore:
 
     def _service_from_row(self, row: asyncpg.Record) -> dict[str, Any]:
         service_name = row["service_name"]
-        primary_key = self._cipher.decrypt(service_name, bytes(row["encrypted_api_key"]))
+        try:
+            primary_key = self._cipher.decrypt(service_name, bytes(row["encrypted_api_key"]))
+        except Exception as exc:
+            logger.warning("Could not decrypt API key for %s: %s", service_name, exc)
+            primary_key = ""
         secondary_key = None
         if row.get("encrypted_api_key_secondary"):
             try:
