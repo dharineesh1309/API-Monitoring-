@@ -85,7 +85,7 @@ def test_orders_creation_and_listing(client):
 
     with patch("app.services.auth_service.AuthService.get_profile") as mock_profile, \
          patch("app.services.dynamodb_service.DynamoDBService.put_item") as mock_put, \
-         patch("app.services.dynamodb_service.DynamoDBService.scan") as mock_scan:
+         patch("app.services.dynamodb_service.DynamoDBService.latest") as mock_scan:
 
         mock_profile.return_value = User(
             user_id="usr_test123456",

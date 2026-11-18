@@ -60,10 +60,9 @@ async def create_order(body: OrderCreate, container: Container = Depends(get_con
 
 @router.get("", response_model=OrderListOut, summary="List orders (DynamoDB scan)")
 async def list_orders(container: Container = Depends(get_container)) -> OrderListOut:
-    items = await asyncio.to_thread(container.dynamodb.scan, container.dynamodb.orders_table, limit=2000)
+    items = await asyncio.to_thread(container.dynamodb.latest, container.dynamodb.orders_table, limit=100)
     orders = [Order.from_item(item) for item in items]
-    orders.sort(key=lambda o: o.created_at or "", reverse=True)
-    return OrderListOut(orders=orders[:100], count=len(orders[:100]))
+    return OrderListOut(orders=orders, count=len(orders))
 
 
 @router.get("/{order_id}", response_model=OrderOut, summary="Get an order by id (DynamoDB)")

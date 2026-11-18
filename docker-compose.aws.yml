@@ -190,6 +190,8 @@ services:
       # SECURITY TRADEOFF: this disables HTML sanitization for ALL text panels —
       # only acceptable because this stack is a controlled dev/demo deployment.
       - GF_PANELS_DISABLE_SANITIZE_HTML=true
+      # Let the CentralWatch dashboard embed Grafana; anonymous access stays off, so a login is still required.
+      - GF_SECURITY_ALLOW_EMBEDDING=true
     networks:
       - centralwatch-network
 

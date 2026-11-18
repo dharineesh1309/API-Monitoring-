@@ -528,20 +528,14 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": "038c602536fb9ccffd12a5cebe4bdbab",
-          "value": "038c602536fb9ccffd12a5cebe4bdbab"
+          "selected": false,
+          "text": "",
+          "value": ""
         },
         "hide": 0,
         "label": "Trace ID",
         "name": "traceId",
-        "options": [
-          {
-            "selected": true,
-            "text": "038c602536fb9ccffd12a5cebe4bdbab",
-            "value": "038c602536fb9ccffd12a5cebe4bdbab"
-          }
-        ],
+        "options": [],
         "query": "",
         "skipUrlSync": false,
         "type": "textbox"

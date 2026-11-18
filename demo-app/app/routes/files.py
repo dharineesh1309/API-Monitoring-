@@ -48,7 +48,7 @@ async def upload_file(
 
 @router.get("", response_model=FileListOut, summary="List files (DynamoDB scan)")
 def list_files(container: Container = Depends(get_container)) -> FileListOut:
-    items = container.dynamodb.scan(container.dynamodb.files_table, limit=50)
+    items = container.dynamodb.latest(container.dynamodb.files_table, limit=50)
     files = [FileRecord.from_item(item) for item in items]
     return FileListOut(files=files, count=len(files))
 
