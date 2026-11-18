@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: centralwatch-ingress
+  namespace: centralwatch
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "1800"
+spec:
+  tls:
+    - hosts:
+        - centralwatch.internal
+        - demo.internal
+      secretName: centralwatch-tls
+  rules:
+    - host: centralwatch.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: centralwatch-platform-ui
+                port:
+                  number: 8080
+    - host: demo.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: centralwatch-demo-ui
+                port:
+                  number: 8090
+

@@ -37,7 +37,7 @@ if [ "$MODE" = "aws" ]; then
   # Real AWS stack: no LocalStack container (and the frontend is optional there).
   CONTAINERS=("centralwatch-otel-collector" "centralwatch-prometheus" "centralwatch-loki" "centralwatch-tempo" "centralwatch-grafana" "centralwatch-demo-app")
 else
-  CONTAINERS=("centralwatch-otel-collector" "centralwatch-prometheus" "centralwatch-loki" "centralwatch-tempo" "centralwatch-grafana" "centralwatch-demo-app" "centralwatch-localstack" "centralwatch-frontend")
+  CONTAINERS=("centralwatch-otel-collector" "centralwatch-prometheus" "centralwatch-loki" "centralwatch-tempo" "centralwatch-grafana" "centralwatch-demo-app" "centralwatch-localstack" "centralwatch-frontend" "centralwatch-demo-frontend" "centralwatch-alertmanager")
 fi
 ALL_RUNNING=true
 
@@ -177,6 +177,32 @@ done
 if [ "$APP_READY" = false ]; then
   echo "Error: demo app is not reachable." >&2
   exit 1
+fi
+
+# 6c. Check Platform UI (:8080) and Demo App UI (:8090)
+echo "Checking Platform UI (http://localhost:8080)..."
+PLATFORM_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || echo "000")
+if [ "$PLATFORM_CODE" = "200" ]; then
+  echo "  [PASS] Platform UI is reachable on :8080 (HTTP 200)."
+else
+  echo "  [WARN] Platform UI returned HTTP $PLATFORM_CODE on :8080"
+fi
+
+echo "Checking Demo App UI (http://localhost:8090)..."
+DEMO_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8090/ || echo "000")
+if [ "$DEMO_CODE" = "200" ]; then
+  echo "  [PASS] Demo App UI is reachable on :8090 (HTTP 200)."
+else
+  echo "  [WARN] Demo App UI returned HTTP $DEMO_CODE on :8090"
+fi
+
+# 6d. Check Alertmanager readiness (http://localhost:9093)
+echo "Checking Alertmanager (http://localhost:9093/-/ready)..."
+ALERT_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:9093/-/ready || echo "000")
+if [ "$ALERT_CODE" = "200" ]; then
+  echo "  [PASS] Alertmanager is ready on :9093 (HTTP 200)."
+else
+  echo "  [WARN] Alertmanager returned HTTP $ALERT_CODE on :9093"
 fi
 
 # 7. Deep Scrape Verification: Check Prometheus target health

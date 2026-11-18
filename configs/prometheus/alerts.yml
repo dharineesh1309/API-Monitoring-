@@ -1,0 +1,92 @@
+groups:
+  - name: centralwatch.rules
+    rules:
+      - alert: ApplicationErrorDetected
+        expr: sum by (service_name) (increase(centralwatch_http_server_duration_milliseconds_count{http_target="/simulate/error", http_status_code="500"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Application error (HTTP 500) detected"
+          description: "Deliberate internal server error triggered on {{ $labels.service_name }} via /simulate/error."
+
+      - alert: AWSS3FailureDetected
+        expr: sum by (service_name) (increase(centralwatch_http_server_duration_milliseconds_count{http_target="/simulate/s3-error", http_status_code="502"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AWS S3 integration failure (HTTP 502) detected"
+          description: "S3 put_object to invalid bucket failed with NoSuchBucket on {{ $labels.service_name }}."
+
+      - alert: IPBruteForceBlocked
+        expr: sum by (service_name) (increase(centralwatch_http_server_duration_milliseconds_count{http_target="/simulate/brute-force", http_status_code="403"}[5m])) > 0 or increase(centralwatch_security_violations_total{violation="blocked_ip"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Brute-force attack detected & IP temporarily blocked"
+          description: "Untrusted external IP attempted brute-force access and was dynamically blocked by CentralWatch firewall."
+
+      - alert: HTTP5xxErrorsDetected
+        expr: sum by (service_name, http_status_code) (increase(centralwatch_http_server_duration_milliseconds_count{http_status_code=~"5.."}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 5xx error detected on {{ $labels.service_name }}"
+          description: "Service {{ $labels.service_name }} returned HTTP {{ $labels.http_status_code }}."
+
+      - alert: HighErrorRate
+        expr: sum by (service_name) (rate(centralwatch_http_server_duration_milliseconds_count{http_status_code=~"5.."}[2m])) > 0.01
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "High HTTP 5xx error rate detected"
+          description: "Service {{ $labels.service_name }} has a 5xx error rate above threshold."
+
+      - alert: HighLatencyP99
+        expr: histogram_quantile(0.95, sum by (le, service_name) (rate(centralwatch_http_server_duration_milliseconds_bucket[2m]))) > 1000
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latency is above 1000ms"
+          description: "Service {{ $labels.service_name }} latency is above the 1000ms threshold."
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been unreachable for more than 30 seconds."
+
+      - alert: ProxySecurityViolationsSpike
+        expr: rate(centralwatch_security_violations_total[2m]) > 5
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spike in API proxy security violations"
+          description: "Over 5 security violations/sec detected in proxy gateway."
+
+      - alert: SSRFBlockedAttempt
+        expr: increase(centralwatch_security_violations_total{reason="ssrf_blocked"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SSRF attempt blocked by CentralWatch firewall"
+          description: "An upstream request attempted to access private/link-local IP space."
+
+      - alert: RateLimitExceededSpike
+        expr: rate(centralwatch_proxy_rate_limited_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated rate limit rejections"
+          description: "High rate of 429 rejections on API proxy."

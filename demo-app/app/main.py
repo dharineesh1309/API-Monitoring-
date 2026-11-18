@@ -1,5 +1,4 @@
 """CentralWatch Demo App — FastAPI entry point.
-
 Generates realistic telemetry (metrics, logs, traces) for the CentralWatch
 observability stack. AWS connectivity is environment-driven: LocalStack when
 AWS_ENDPOINT_URL is set, real AWS default endpoints otherwise.
@@ -12,15 +11,16 @@ from contextlib import asynccontextmanager
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+import httpx
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-from centralwatch_security import SecurityEnforcementMiddleware, create_security_router
+from centralwatch_security import SecurityEnforcementMiddleware, create_security_router, proxy_router
 
 from .config.settings import get_settings
 from .routes import auth, chat, files, images, notifications, orders, queue, security_agent, simulate
-from .routes.simulate import SimulatedAWSError, SimulatedFailure
+from .routes.simulate import SimulatedAWSError, SimulatedBruteForceBlocked, SimulatedFailure
 from .services import Container
 from .telemetry.instrumentation import configure_telemetry, instrument_app, shutdown_telemetry
 from .telemetry.logging import get_logger, setup_logging
@@ -130,6 +130,7 @@ async def lifespan(app: FastAPI):
         # Dev/LocalStack: create missing resources idempotently, then reconcile.
         try:
             await asyncio.to_thread(container.initializer.ensure_resources, True)
+            await asyncio.to_thread(container.auth.seed_admin_if_needed)
         except Exception:
             logger.exception("Initial AWS resource provisioning failed; reconcile loop will retry")
         reconcile_task = asyncio.create_task(_reconcile_loop(container))
@@ -142,7 +143,38 @@ async def lifespan(app: FastAPI):
             logger.critical("AWS resource validation failed: %s", exc)
             raise
 
+    # PostgreSQL Proxy Store initialization
+    proxy_store = getattr(app.state, "centralwatch_proxy_store", None)
+    owns_proxy_store = proxy_store is None
+    if owns_proxy_store:
+        try:
+            from centralwatch_security import PostgresProxyStore
+            from centralwatch_security.routers import _DEFAULT_EXTERNAL_SERVICES, _DEFAULT_PROXY_ROLES
+            proxy_store = PostgresProxyStore.from_environment()
+            app.state.centralwatch_proxy_store = proxy_store
+            await proxy_store.start(_DEFAULT_EXTERNAL_SERVICES, _DEFAULT_PROXY_ROLES)
+            logger.info("PostgresProxyStore initialized and ready")
+        except Exception as exc:
+            logger.warning("PostgresProxyStore initialization deferred/unavailable: %s", exc)
+
+    http_client = getattr(app.state, "centralwatch_proxy_http_client", None)
+    owns_http_client = http_client is None
+    if owns_http_client:
+        http_client = httpx.AsyncClient(follow_redirects=False, limits=httpx.Limits(max_connections=100, max_keepalive_connections=20))
+        app.state.centralwatch_proxy_http_client = http_client
+
     yield
+
+    if owns_http_client and http_client is not None:
+        try:
+            await http_client.aclose()
+        except Exception:
+            pass
+    if owns_proxy_store and proxy_store is not None:
+        try:
+            await proxy_store.close()
+        except Exception:
+            pass
 
     if reconcile_task is not None:
         reconcile_task.cancel()
@@ -266,6 +298,7 @@ def create_app() -> FastAPI:
     # 500/502 status code is recorded as a metric label.
     app.add_exception_handler(SimulatedFailure, _global_exception_handler)
     app.add_exception_handler(SimulatedAWSError, _global_exception_handler)
+    app.add_exception_handler(SimulatedBruteForceBlocked, _global_exception_handler)
     app.add_exception_handler(Exception, _global_exception_handler)
 
     app.include_router(auth.router)
@@ -275,6 +308,9 @@ def create_app() -> FastAPI:
     app.include_router(queue.router)
     app.include_router(images.router)
     app.include_router(simulate.router)
+    app.include_router(chat.router)
+    app.include_router(security_agent.router)
+    app.include_router(proxy_router, prefix="/centralwatch")
 
     # Mount the OWASP ASTF scanner endpoint, wired to the app's real auth so the
     # plugin stays decoupled from demo-app internals (see create_security_router).

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta id="theme-color" name="theme-color" content="#eef4ff">
+  <meta name="description" content="CentralWatch API operations and observability dashboard">
+  <title>CentralWatch Demo App</title>
+  <script>
+    (() => {
+      try {
+        const stored = localStorage.getItem("centralwatch-theme-preference") || localStorage.getItem("centralwatch-theme");
+        const preference = ["light", "dark"].includes(stored)
+          ? stored
+          : (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.dataset.theme = preference;
+        localStorage.setItem("centralwatch-theme-preference", preference);
+        localStorage.removeItem("centralwatch-theme");
+      } catch (_) {
+        const preference = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.dataset.theme = preference;
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="/styles.css?v=centralwatch-v2-separated">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand"><span class="brand-mark">C</span><div><strong>CentralWatch Demo</strong><small>Sample Application</small></div></div>
+            <nav class="sidebar-nav" aria-label="Application navigation">
+        <p class="nav-label">Demo application</p>
+        <a class="nav-link active" href="#chat" data-view-link="chat">Gemini chatbot</a>
+        <a class="nav-link" href="#orders" data-view-link="orders">Orders</a>
+        <a class="nav-link" href="#files" data-view-link="files">Files</a>
+        <a class="nav-link" href="#aws" data-view-link="aws">AWS workflows</a>
+        <a class="nav-link" href="#simulations" data-view-link="simulations">Simulations</a>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="account-button" id="account-button" type="button"><span class="avatar" id="account-avatar">?</span><span><strong id="account-name">Sign in</strong><small id="account-detail">Required for demo APIs</small></span></button>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-title"><button class="icon-button mobile-menu" id="mobile-menu" type="button" aria-label="Open navigation">Menu</button><div><strong id="current-page-title">Overview</strong><small id="current-page-subtitle">Service health and recent activity</small></div></div>
+        <div class="topbar-actions"><a class="button secondary compact" href="http://localhost:8080" target="_blank" rel="noopener" style="margin-right:8px;">CentralWatch (:8080) ↗</a><span class="global-status" id="global-status"><i></i><span>Checking services</span></span><div class="theme-switcher" role="radiogroup" aria-label="Color theme"><button type="button" role="radio" aria-checked="false" data-theme-choice="light">Light</button><button type="button" role="radio" aria-checked="false" data-theme-choice="dark">Dark</button></div><a class="button secondary compact" href="/docs" target="_blank" rel="noopener">API docs</a></div>
+      </header>
+
+      <main class="content">
+        <section class="view active" data-view="chat" aria-labelledby="chat-title">
+          <div class="page-heading"><div><h1 id="chat-title">Gemini chatbot</h1><p>Send prompts through CentralWatch without placing the Gemini API key in the demo application's environment.</p></div><button class="button ghost" id="clear-chat" type="button">Clear conversation</button></div>
+          <div class="layout-grid chat-grid">
+            <article class="card span-2 chat-card">
+              <div class="card-header"><div><h2>Conversation</h2><p>The demo app sends your prompt and proxy token to CentralWatch. Only CentralWatch adds the Gemini key.</p></div><span class="status-badge neutral" id="chat-ready-state"><i></i><span>Setup required</span></span></div>
+              <div class="chat-messages" id="chat-messages" aria-live="polite"><div class="empty-state"><strong>No messages yet</strong><span>Configure Gemini, then send a prompt.</span></div></div>
+              <form class="chat-compose" id="chat-form">
+                <label class="sr-only" for="chat-prompt">Prompt</label><textarea id="chat-prompt" name="prompt" required maxlength="8000" rows="3" placeholder="Ask Gemini something..."></textarea>
+                <div class="chat-compose-actions"><label>Model<input id="chat-model" name="model" value="gemini-2.5-flash" required maxlength="100" pattern="[A-Za-z0-9._-]+"></label><button class="button primary" id="send-chat" type="submit">Send prompt</button></div>
+                <p class="form-message" id="chat-message" role="status"></p>
+              </form>
+            </article>
+            <article class="card chat-setup-card">
+              <div class="card-header"><div><h2>Gemini connection</h2><p>The key is submitted directly to the CentralWatch service registry and cleared from this form.</p></div></div>
+              <dl class="detail-list"><div><dt>Service</dt><dd><code>gemini_api</code></dd></div><div><dt>Role</dt><dd><code>gemini_chat</code> · POST only</dd></div><div><dt>Key status</dt><dd id="gemini-key-status">Checking...</dd></div><div><dt>Proxy token</dt><dd id="gemini-token-status">Not loaded</dd></div></dl>
+              <form class="form" id="gemini-config-form"><label>Gemini API key<input id="gemini-api-key" name="api_key" type="password" required autocomplete="off" placeholder="Paste key from Google AI Studio"><small>Not written to the demo app environment or browser storage.</small></label><button class="button primary" id="configure-gemini" type="submit">Save key in CentralWatch</button><p class="form-message" id="gemini-config-message" role="status"></p></form>
+              <div class="section-divider"></div>
+              <form class="form" id="gemini-token-form"><label>Existing CentralWatch proxy token<input id="gemini-proxy-token" name="proxy_token" type="password" autocomplete="off" placeholder="cw_proxy_... or cw_role_..."><small>Use this after a page reload or when the token was created on the API proxy page.</small></label><div style="display:flex;gap:8px;"><button class="button secondary" type="submit">Use proxy token</button><button class="button ghost" id="clear-proxy-token" type="button">Clear token</button></div><p class="form-message" id="gemini-token-message" role="status"></p></form>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="orders" aria-labelledby="orders-title" hidden>
+          <div class="page-heading"><div><h1 id="orders-title">Orders</h1><p>Create and inspect DynamoDB-backed orders from the demo API.</p></div><div class="button-row"><button class="button secondary" id="refresh-orders" type="button">Refresh</button><button class="button primary" id="new-order" type="button">New order</button></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to access orders.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <article class="card protected-content" data-protected-content hidden>
+            <div class="card-header stack-mobile"><div><h2>Order history</h2><p>Recent orders from DynamoDB with real-time updates.</p></div><div class="filter-row"><input class="search-input" id="orders-search" type="search" placeholder="Search orders"><select id="orders-user-filter" aria-label="Filter user orders"><option value="">All users</option><option value="mine">My orders</option></select><select id="orders-status" aria-label="Filter order status"><option value="">All statuses</option><option value="created">Created</option></select><select id="orders-sort" aria-label="Sort orders"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="total-desc">Highest total</option><option value="total-asc">Lowest total</option></select></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Order ID</th><th>User</th><th>Items</th><th>Total</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody id="orders-table-body"><tr><td colspan="7"><div class="loading-state"><i></i>Loading orders…</div></td></tr></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" data-view="files" aria-labelledby="files-title" hidden>
+          <div class="page-heading"><div><h1 id="files-title">Files</h1><p>Upload files to S3 and manage their DynamoDB metadata.</p></div><button class="button secondary" id="refresh-files" type="button">Refresh</button></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to access files.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="layout-grid protected-content" data-protected-content hidden>
+            <article class="card span-3"><form class="upload-form" id="file-upload-form"><label>Upload file<input id="file-upload-input" name="file" type="file" required></label><button class="button primary" id="upload-file" type="submit">Upload</button><span class="form-message" id="file-upload-message" role="status"></span></form></article>
+            <article class="card span-3">
+              <div class="card-header stack-mobile"><div><h2>Stored files</h2><p>Files in the configured S3 bucket.</p></div><div class="filter-row"><input class="search-input" id="files-search" type="search" placeholder="Search files"><select id="files-sort" aria-label="Sort files"><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="size-desc">Largest first</option><option value="size-asc">Smallest first</option></select></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>Created</th><th></th></tr></thead><tbody id="files-table-body"><tr><td colspan="5"><div class="loading-state"><i></i>Loading files…</div></td></tr></tbody></table></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-view="aws" aria-labelledby="aws-title" hidden>
+          <div class="page-heading"><div><h1 id="aws-title">AWS workflows</h1><p>Exercise the LocalStack-backed SNS, SQS, S3, and Lambda integrations.</p></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to run AWS workflows.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="layout-grid protected-content" data-protected-content hidden>
+            <article class="card"><div class="card-header"><div><h2>Notification</h2><p>Publish an email or SMS notification through SNS.</p></div></div><form class="form" id="notification-form"><label>Channel<select id="notification-channel" name="channel"><option value="email">Email</option><option value="sms">SMS</option></select></label><label>Recipient<input name="recipient" required placeholder="user@example.com or +15551234567"></label><label class="notification-subject">Subject<input name="subject" maxlength="200" placeholder="Optional subject"></label><label>Message<textarea name="message" required rows="4" placeholder="Notification message"></textarea></label><button class="button primary" id="send-notification" type="submit">Send notification</button><p class="form-message" id="notification-message" role="status"></p></form></article>
+            <article class="card"><div class="card-header"><div><h2>Queue</h2><p>Send and receive messages through SQS.</p></div></div><form class="form" id="queue-form"><label>Message body<textarea name="body" required rows="4" placeholder="Message for the queue"></textarea></label><button class="button primary" id="send-queue-message" type="submit">Send message</button><p class="form-message" id="queue-send-message" role="status"></p></form><div class="section-divider"></div><div class="card-header compact-header"><div><h3>Received messages</h3><p>Receiving removes messages from the queue.</p></div><button class="button secondary compact" id="receive-queue" type="button">Receive</button></div><div class="message-list" id="queue-message-list"><div class="empty-state compact"><strong>No messages loaded</strong><span>Select Receive to check the queue.</span></div></div></article>
+            <article class="card"><div class="card-header"><div><h2>Image processing</h2><p>Run the S3 → Lambda → SNS workflow.</p></div></div><form class="form" id="image-form"><label>Image file<input id="image-input" name="file" type="file" accept="image/*" required></label><button class="button primary" id="process-image" type="submit">Process image</button><p class="form-message" id="image-message" role="status"></p></form><div class="result-box" id="image-result" hidden></div></article>
+          </div>
+        </section>
+
+        <section class="view" data-view="simulations" aria-labelledby="simulations-title" hidden>
+          <div class="page-heading"><div><h1 id="simulations-title">Simulations</h1><p>Generate deliberate telemetry scenarios and inspect the results in Grafana.</p></div></div>
+          <div class="auth-notice protected-notice" data-auth-notice><div><strong>Authentication required</strong><span>Sign in to run simulations.</span></div><button class="button primary" type="button" data-open-auth>Sign in</button></div>
+          <div class="card protected-content" data-protected-content hidden><div class="simulation-list"><article><div><strong>Application error</strong><p>Returns an intentional HTTP 500 and produces an error trace and log.</p></div><button class="button secondary" type="button" data-simulation="error">Run</button><pre data-simulation-result="error" hidden></pre></article><article><div><strong>Slow request</strong><p>Waits five seconds before returning successfully to create a latency trace.</p></div><button class="button secondary" type="button" data-simulation="timeout">Run</button><pre data-simulation-result="timeout" hidden></pre></article><article><div><strong>S3 failure</strong><p>Attempts to write to an invalid bucket and returns the expected HTTP 502.</p></div><button class="button secondary" type="button" data-simulation="s3-error">Run</button><pre data-simulation-result="s3-error" hidden></pre></article><article><div><strong>Retry sequence</strong><p>Runs the configured retry workflow and returns after the third attempt.</p></div><button class="button secondary" type="button" data-simulation="retry">Run</button><pre data-simulation-result="retry" hidden></pre></article><article><div><strong>Brute-force attack (IP block)</strong><p>Simulates untrusted IP 198.51.100.42 sending rapid requests and being dynamically blocked by CentralWatch firewall.</p></div><button class="button secondary" type="button" data-simulation="brute-force">Run</button><pre data-simulation-result="brute-force" hidden></pre></article></div></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog class="dialog" id="auth-dialog">
+    <div class="dialog-header"><div><h2 id="auth-dialog-title">Sign in</h2><p id="auth-dialog-subtitle">Use a CentralWatch account to access protected APIs.</p></div><button class="icon-button" type="button" data-dialog-close="auth-dialog" aria-label="Close">Close</button></div>
+    <div class="dialog-body">
+      <div id="auth-forms"><div class="tabs auth-tabs"><button class="tab active" id="show-login" type="button">Sign in</button><button class="tab" id="show-register" type="button">Create account</button></div><form class="form" id="login-form"><label>Email<input name="email" type="email" autocomplete="username" required placeholder="operator@example.com"></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="button primary" id="login-submit" type="submit">Sign in</button><p class="form-message" id="login-message" role="status"></p></form><form class="form" id="register-form" hidden><label>Name<input name="name" autocomplete="name" required maxlength="100" placeholder="Operator name"></label><label>Email<input name="email" type="email" autocomplete="email" required placeholder="operator@example.com"></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="6" maxlength="128" required></label><label>Allowed CIDRs<input name="allowed_cidrs" value="0.0.0.0/0, ::/0" required><small>Comma-separated network ranges for this local account.</small></label><button class="button primary" id="register-submit" type="submit">Create account</button><p class="form-message" id="register-message" role="status"></p></form></div>
+      <div id="account-profile" hidden><div class="profile-heading"><span class="avatar large" id="profile-avatar">?</span><div><strong id="profile-name">-</strong><span id="profile-email">-</span></div></div><dl class="detail-list"><div><dt>User ID</dt><dd id="profile-user-id">-</dd></div><div><dt>Status</dt><dd id="profile-status">-</dd></div><div><dt>Allowed networks</dt><dd id="profile-cidrs">-</dd></div></dl><button class="button danger" id="sign-out" type="button">Sign out</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog wide" id="order-dialog">
+    <div class="dialog-header"><div><h2>Create order</h2><p>Add one or more products to a new DynamoDB order.</p></div><button class="icon-button" type="button" data-dialog-close="order-dialog" aria-label="Close">Close</button></div>
+    <form class="dialog-body form" id="order-form"><label>User ID<input id="order-user-id" name="user_id" required></label><div class="order-items-heading"><strong>Items</strong><button class="button secondary compact" id="add-order-item" type="button">Add item</button></div><div class="order-items" id="order-items"></div><div class="dialog-actions"><span class="form-message" id="order-message" role="status"></span><button class="button primary" id="create-order" type="submit">Create order</button></div></form>
+  </dialog>
+
+  <dialog class="dialog" id="detail-dialog"><div class="dialog-header"><div><h2 id="detail-title">Details</h2><p id="detail-subtitle"></p></div><button class="icon-button" type="button" data-dialog-close="detail-dialog" aria-label="Close">Close</button></div><div class="dialog-body" id="detail-content"></div></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js?v=centralwatch-v10-notoken" defer></script>
+</body>
+</html>

@@ -126,6 +126,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+    volumes:
+      - ./demo-app/app:/app/app
     networks:
       - centralwatch-network
     logging:
@@ -160,8 +162,8 @@ services:
     volumes:
       - localstack-storage:/var/lib/localstack
       # Docker Desktop on Windows/macOS uses /run/host-services/docker.proxy.sock;
-      # on Linux override with DOCKER_SOCK_PATH=/var/run/docker.sock
-      - ${DOCKER_SOCK_PATH:-/run/host-services/docker.proxy.sock}:/var/run/docker.sock
+      # on Linux standard socket is /var/run/docker.sock
+      - ${DOCKER_SOCK_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health > /dev/null || exit 1"]
       interval: 10s
@@ -185,7 +187,7 @@ services:
       - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-storage:/prometheus
     ports:
-      - "9090:9090"
+      - "9091:9090"
     networks:
       - centralwatch-network
     depends_on:
@@ -267,7 +269,8 @@ services:
       # without putting administrator credentials in the browser.
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
       - GF_AUTH_ANONYMOUS_HIDE_VERSION=true
       - GF_USERS_ALLOW_SIGN_UP=false
       # Allows the embedded HTML text panel (Threat Scanner Control Panel) to run
@@ -288,8 +291,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Frontend — serves the prebuilt React SPA and proxies /api/* to the backend
-  # (the bundle calls /api/... on the same origin). No monitoring involvement.
+  # Frontend — serves the CentralWatch operations portal (:8080)
   frontend:
     image: nginx:1.27-alpine
     container_name: centralwatch-frontend
@@ -297,10 +299,85 @@ services:
     ports:
       - "8080:80"
     volumes:
-      - ./frontend/dist:/usr/share/nginx/html:ro
-      - ./configs/nginx/frontend.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/platform:/usr/share/nginx/html:ro
+      - ./configs/nginx/centralwatch.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - demo-app
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Demo Frontend — serves the client demo application portal (:8090)
+  demo-frontend:
+    image: nginx:1.27-alpine
+    container_name: centralwatch-demo-frontend
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./frontend/demo:/usr/share/nginx/html:ro
+      - ./configs/nginx/demo.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - demo-app
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Alertmanager — alert evaluation, deduplication, and notification routing (:9093)
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: centralwatch-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./configs/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Downstream microservice for distributed trace demonstration (:8001)
+  inventory-service:
+    build:
+      context: ./inventory-service
+      dockerfile: Dockerfile
+    image: centralwatch-inventory:local
+    container_name: centralwatch-inventory
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=centralwatch-inventory
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis cache for token rate limiting & session state
+  redis:
+    image: redis:7-alpine
+    container_name: centralwatch-redis
+    restart: unless-stopped
     networks:
       - centralwatch-network
     logging:

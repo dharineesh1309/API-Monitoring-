@@ -24,6 +24,7 @@ class SecurityFinding(BaseModel):
     remediation: str
     remediable: bool = False
     requires_confirmation: bool = False
+    cis_benchmark: str | None = None
 
 
 class SecurityScanSummary(BaseModel):
@@ -33,6 +34,7 @@ class SecurityScanSummary(BaseModel):
     unavailable: int
     errors: int
     remediable: int
+    compliance_score: float = 100.0
 
 
 class SecurityScanResponse(BaseModel):
@@ -44,6 +46,9 @@ class SecurityScanResponse(BaseModel):
     remediation_enabled: bool
     summary: SecurityScanSummary
     findings: list[SecurityFinding]
+    compliance_score: float = 100.0
+    threat_correlations: list[dict] = Field(default_factory=list)
+    trend_history: list[dict] = Field(default_factory=list)
 
 
 class SecurityRemediationRequest(BaseModel):

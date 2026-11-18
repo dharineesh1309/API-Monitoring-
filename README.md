@@ -1,433 +1,227 @@
-# CentralWatch
+# CentralWatch — Production-Grade Cloud & API Observability Platform
 
-CentralWatch is an end-to-end **observability demo**: a FastAPI application (`demo-app`) that
-performs real business workflows against AWS and generates rich OpenTelemetry telemetry —
-metrics, logs, and traces — which flow through an OpenTelemetry Collector into
-**Prometheus** (metrics), **Loki** (logs) and **Tempo** (traces), visualized in **Grafana**.
+CentralWatch is an enterprise-grade **API Security, Monitoring, and Observability Platform** designed to provide full-stack visibility, credential governance, active threat defense, and distributed tracing across cloud-native architectures.
 
-The monitoring system is a **bystander**. It never sits in the application's request path:
+The architecture strictly separates the **CentralWatch Management Platform** (`:8080`) from client-facing **Business Applications** (`:8090`). The observability pipeline acts as a **non-intrusive bystander** that never sits on the critical data path of application requests.
 
 ```
-                      Application traffic
-  Browser ──> nginx (frontend) ──/api──> FastAPI (demo-app) ──boto3──> AWS
-                                                    │
-                                        OpenTelemetry SDK (OTLP over HTTP)
-                                                    │
-                                             otel-collector :4318
-                                              ┌──────┼──────┐
-                                              ▼      ▼      ▼
-                                         Prometheus  Loki  Tempo
-                                              └──────┼──────┘
-                                                     ▼
-                                                  Grafana
+                         APPLICATION TRAFFIC (Decoupled & Monitored)
+   Browser ───[ :8090 ]───> Demo App (FastAPI :8000) ──W3C Trace──> Inventory Service (:8001)
+                                      │                                       │
+                                      ▼ (boto3)                               ▼ (boto3)
+                            LocalStack / AWS Services               LocalStack / AWS Services
+                                      │                                       │
+                                      └───────────────────┬───────────────────┘
+                                                          │ OpenTelemetry SDK (OTLP HTTP/gRPC)
+                                                          ▼
+                                              OTel Collector (:4317 / :4318)
+                                               ┌──────────┼──────────┐
+                                               ▼          ▼          ▼
+                                          Prometheus    Loki       Tempo
+                                            (:9090)    (:3100)    (:3200)
+                                               │          │          │
+                                               ├──────────┴──────────┘
+                                               ▼
+                                            Grafana (:3000)
+                                               ▲
+                                               │ Embedded Deep Links
+   Operator ──[ :8080 ]───> CentralWatch Platform Gateway ──> Security & Proxy Store (Postgres)
 ```
-
-Two runtime modes are supported with **the same codebase** (everything is environment-driven):
-
-| Mode | `AWS_ENDPOINT_URL` | `AWS_PROVISION_RESOURCES` | Backend |
-| :--- | :--- | :--- | :--- |
-| **LocalStack (dev, default)** | `http://localstack:4566` | `true` — resources auto-created | offline emulator |
-| **Real AWS (production)** | empty | `false` — resources validated, fail fast | real AWS |
 
 ---
 
-## 1. Quick start (LocalStack / dev)
+## 1. System Port & Service Architecture
 
-Requires Docker + Docker Compose v2 only — **no pre-built images, no manually created
-networks, no pre-created resources**.
+CentralWatch runs 12 integrated services on a dedicated Docker network (`centralwatch-network`):
 
-```bash
-docker compose up -d --build
-```
-
-This builds and starts all 9 services on one shared network (`centralwatch-network`):
-
-| Service | Container | Host port | Purpose |
+| Service | Container | Host Port | Purpose & Architectural Role |
 | :--- | :--- | :--- | :--- |
-| `proxy-db` | `centralwatch-proxy-db` | internal only | PostgreSQL store for proxy services, roles, encrypted API keys, and token hashes |
-| `frontend` | `centralwatch-frontend` | `8080` | Serves the built React SPA, proxies `/api/*` → backend |
-| `demo-app` | `centralwatch-demo-app` | `8000` | FastAPI app (`/docs` for Swagger) |
-| `localstack` | `centralwatch-localstack` | `4566` | AWS emulation (S3, DynamoDB, SNS, SQS, Lambda) |
-| `otel-collector` | `centralwatch-otel-collector` | `4317`/`4318`/`8889` | OTLP ingress, Prometheus endpoint |
-| `prometheus` | `centralwatch-prometheus` | `9090` | Metrics store + query |
-| `loki` | `centralwatch-loki` | `3100` | Logs store + query |
-| `tempo` | `centralwatch-tempo` | `3200` | Traces store + TraceQL |
-| `grafana` | `centralwatch-grafana` | `3000` | Dashboards (`admin` / `admin` by default) |
+| **Platform UI** | `centralwatch-frontend` | `8080` | Dedicated operations portal: Overview, Proxy, ASTF Scanner, AWS CSPM, Observability |
+| **Demo Application** | `centralwatch-demo-frontend` | `8090` | Client portal: Gemini Chatbot, Orders, S3 Files, AWS Workflows, Simulations |
+| **Demo API Backend** | `centralwatch-demo-app` | `8000` | FastAPI core service emitting rich OpenTelemetry logs, metrics, and traces |
+| **Inventory Microservice** | `centralwatch-inventory` | `8001` | Downstream microservice for multi-hop distributed tracing via W3C TraceContext |
+| **Traffic Generator** | `centralwatch-traffic-gen` | *background* | Continuous autonomous workload generator exercising auth, orders, and traces |
+| **PostgreSQL Proxy DB** | `centralwatch-proxy-db` | *internal:5432* | Tamper-evident audit logs, encrypted proxy secrets, multi-worker persistent state |
+| **Prometheus** | `centralwatch-prometheus` | `9090` | Metrics time-series database with automated SLO & alert evaluation |
+| **Alertmanager** | `centralwatch-alertmanager` | `9093` | Alert grouping, deduplication, and notification routing (Slack / Webhook) |
+| **Grafana** | `centralwatch-grafana` | `3000` | Pre-provisioned dashboards with direct Loki-to-Tempo log-to-trace navigation |
+| **Loki** | `centralwatch-loki` | `3100` | High-efficiency structured log aggregation with 7-day retention policy |
+| **Tempo** | `centralwatch-tempo` | `3200` | High-throughput distributed tracing with TraceQL query engine |
+| **LocalStack** | `centralwatch-localstack` | `4566` | Offline cloud emulator for S3, DynamoDB, SNS, SQS, and Lambda |
+| **OTel Collector** | `centralwatch-otel-collector` | `4317`/`4318`/`8889` | Unified OpenTelemetry telemetry ingestion pipeline and Prometheus exporter |
 
-The demo app waits for LocalStack, then **auto-provisions** (idempotently): S3 bucket
-`centralwatch-files`, DynamoDB tables `users` (with `email-index` GSI), `orders`, `files`,
-SNS topic `centralwatch-notifications`, SQS queue `centralwatch-queue`, and Lambda function
-`centralwatch-image-processor`. A reconcile loop re-creates anything that disappears.
+---
 
-Verify:
-
-```bash
-./scripts/healthcheck.sh          # deep health of every component
-curl -s http://localhost:8000/healthz
-curl -s http://localhost:8080/    # frontend
-```
-
-## 2. Authentication
-
-Business endpoints (`/orders`, `/files`, `/images`, `/notifications`, `/queue`,
-`/simulate`) require a **Bearer token** issued by `/auth/login`. Public endpoints:
-`/auth/register`, `/auth/login`, `/healthz`, `/livez`, `/readyz`, `/docs`.
-
-```bash
-# Register + login
-curl -s -X POST http://localhost:8000/auth/register -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"secret123","name":"Alice"}'
-TOKEN=$(curl -s -X POST http://localhost:8000/auth/login -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"secret123"}' | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
-
-# Protected call
-curl -s -X POST http://localhost:8000/orders -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"usr_demo","items":[{"product_id":"p1","name":"Widget","quantity":2,"unit_price":9.99}]}'
-
-# Without a token you get 401
-curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8000/orders \
-  -H 'Content-Type: application/json' \
-  -d '{"user_id":"x","items":[{"product_id":"p1","name":"W","quantity":1,"unit_price":1}]}'
-```
-
-Tokens are HMAC-signed (PBKDF2-hashed passwords, stateless tokens). The signing secret comes
-from **`AUTH_TOKEN_SECRET`** — there is no default in code and the app **fails fast** at
-startup if it is missing. The dev compose ships a documented dev-only default; the AWS compose
-requires it with no default (see [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md)).
-
-## 3. Real AWS mode (production)
-
-See **[AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md)** for the complete guide: the exact AWS resources
-the code uses, least-privilege IAM policies (app role + Lambda execution role), and the
-production compose file:
-
-```bash
-docker compose -f docker-compose.aws.yml up -d --build
-```
-
-In production mode the app **validates** every required resource at startup and exits with a
-clear error if any are missing. `AUTH_TOKEN_SECRET` and `GRAFANA_ADMIN_PASSWORD` are required
-(no defaults).
-
-A ready-to-fill template with every real-AWS variable is provided at **`.env.aws.example`**
-(copy it to `.env` for `docker compose` substitution, or to `demo-app/.env` for a bare uvicorn
-run). Never commit the filled-in file — `.env` is gitignored.
-
-> **Real-AWS verification status:** the real-AWS code path (empty endpoint, default credential
-> chain, `AWS_PROVISION_RESOURCES=false` validation) is verified statically against the exact
-> SDK calls in the source. It has **not** been exercised against a live AWS account in this
-> environment — see the limitation note in `AWS_DEPLOYMENT.md`.
-
-## 4. Unified CentralWatch dashboard
-
-The `frontend/dist/` directory contains the static CentralWatch control plane. `nginx` serves it
-at `http://127.0.0.1:8080`, proxies `/api/*` to FastAPI, and exposes same-origin `/system/*`
-health checks for the Docker services. The dashboard combines live service status, centralized
-proxy registration, authenticated OWASP scans, a permission-gated AWS minimum-security agent,
-embedded Grafana dashboards, and the complete
-demo-app workflow set: authentication, orders, files, notifications, queues, image processing,
-and telemetry simulations. No separate frontend build step is required.
-
-### AWS minimum-security agent
-
-Open `http://127.0.0.1:8080/#aws-security` after signing in. The agent performs a read-only scan of the configured S3 bucket, DynamoDB tables, SQS queue, SNS topic, and Lambda function. It reports minimum-security gaps for public access, encryption, recovery/versioning, and tracing.
-
-The agent does not make changes during a scan. Applying a fix requires the server policy `AWS_SECURITY_AGENT_ALLOW_REMEDIATION=true`, selected failed findings, an explicit dashboard confirmation, `confirm: true`, and the exact acknowledgement `APPLY_SELECTED_REMEDIATIONS`. Production Compose defaults remediation to disabled. See [`AWS_SECURITY_AGENT.md`](AWS_SECURITY_AGENT.md) for the complete baseline, API, IAM permissions, and operational limits.
-
-## 5. Telemetry contract (what the dashboards query)
-
-### Metrics (Prometheus — via the Collector's `centralwatch` namespace)
-
-| Metric | Labels |
-| :--- | :--- |
-| `centralwatch_http_server_duration_milliseconds_{bucket,sum,count}` | `http_method`, `http_status_code`, `http_target`, `service`, `instance`, `deployment_environment` |
-| `centralwatch_orders_created_total` | `status` |
-| `centralwatch_files_uploaded_total` | `status` |
-| `centralwatch_images_processed_total` | `status` |
-| `centralwatch_notifications_sent_total` | `channel`, `status` |
-| `centralwatch_retry_attempts_total` | `operation` |
-| `centralwatch_security_scans_total` | `environment`, `result` |
-| `centralwatch_security_remediations_total` | `service`, `check_id`, `status` |
-| `centralwatch_proxy_requests_total` | `service`, `method`, `status_code`, `outcome`, `role` |
-| `centralwatch_proxy_request_duration_milliseconds_{bucket,sum,count}` | `service`, `method`, `status_code`, `outcome`, `role` |
-
-> The `environment` label is emitted as **`deployment_environment`** (the collector's
-> `resource_to_telemetry_conversion` copies the app's `deployment.environment` resource
-> attribute onto every metric) — `development` in dev mode, `production` on real AWS.
->
-> **Label semantics:** in Prometheus the `service` label is the scrape-job static label (`centralwatch-collector`, the exporter hosting `/metrics`), while `service_name` is the app's OTel resource attribute (`centralwatch-demo-app`). In Tempo, `service.name` is the app (`centralwatch-demo-app`). Dashboards are consistent with this per datasource.
-
-
-### Logs (Loki)
-
-Labels: `job` (= `service.name`), `level` (**uppercase**: `INFO`/`ERROR`/`WARN`), `exporter`.
-Every line is structured JSON with `traceid` / `spanid`, `endpoint`, `http.method`,
-`status_code`, `duration_ms`, plus AWS fields (`aws.service`, `aws.operation`, `channel`, …).
-`traceid` and `endpoint` are **JSON fields** — query them with the `| json` parser:
-
-```logql
-{job="centralwatch-demo-app"} | json | traceid != ""
-{job="centralwatch-demo-app", level="ERROR"}
-```
-
-### Traces (Tempo)
-
-`service.name=centralwatch-demo-app`. Automatic FastAPI/ASGI server spans, botocore AWS spans
-(`S3.PutObject`, `S3.GetObject`, `S3.DeleteObject`, `S3.ListBuckets`, `DynamoDB.PutItem`,
-`DynamoDB.GetItem`, `DynamoDB.Query`, `DynamoDB.Scan`, `DynamoDB.DeleteItem`, `centralwatch-notifications send`,
-`SQS.SendMessage`, `SQS.ReceiveMessage`, `SQS.DeleteMessageBatch`, `Lambda.Invoke`), and manual
-business spans (`User Registration`, `User Login`, `Order Creation`, `Notification Workflow`,
-`Image Processing Workflow`, `Retry Operation` → `Retry Attempt N`).
-
-```traceql
-{ resource.service.name = "centralwatch-demo-app" } && { name = "S3.PutObject" }
-```
-
-## 6. Grafana dashboards
-
-Seven dashboards are provisioned into the **CentralWatch** folder (auto-loading via
-`configs/grafana/provisioning/`):
-
-1. **CentralWatch — Overview** (`overview.json`) — requests/sec, avg/P95/P99 latency, error &
-   success rate, business totals.
-2. **CentralWatch — API Monitoring** (`api-monitoring.json`) — requests by route/method/status,
-   latency by route, error rate, duration histogram, top slow APIs.
-3. **CentralWatch — AWS Services** (`aws-services.json`) — S3/Lambda/SNS/SQS/DynamoDB trace
-   tables + waterfall.
-4. **CentralWatch — Business Metrics** (`business-metrics.json`) — orders/files/images/
-   notifications/retries with `channel`/`status`/`operation` breakdowns.
-5. **CentralWatch — Tracing** (`tracing.json`) — recent/slowest traces, AWS & business span
-   segments, waterfall.
-6. **CentralWatch — Logs** (`logs.json`) — recent logs, ERROR/WARN streams, logs-by-traceid,
-   logs-by-endpoint.
-7. **Security & Threat Intelligence** (`security.json`) — blocked-request metrics, structured
-   security logs, and a link to the authenticated OWASP scan control.
-
-## 7. Health checks
-
-```bash
-./scripts/healthcheck.sh          # all containers + readiness + Prometheus scrape targets
-curl -s http://localhost:8000/healthz    # liveness
-curl -s http://localhost:8000/livez      # liveness
-curl -s http://localhost:8000/readyz     # readiness (checks AWS and proxy database reachability)
-```
-
-## 8. Troubleshooting
-
-| Symptom | Cause / fix |
-| :--- | :--- |
-| `Failed to resolve 'otel-collector'` in app logs | containers on different networks — recreate with `docker compose down && docker compose up -d --build` (the compose file pins one explicit network) |
-| `/images/process` returns 502/`Pending` Lambda | first Lambda sidecar pull is slow on LocalStack; the app warms it up in the background — wait ~60 s and retry. If permanently `Pending`, `docker compose restart localstack demo-app` |
-| Lambda needs the Docker socket | required **only** in LocalStack mode. Docker Desktop path `/run/host-services/docker.proxy.sock`; on Linux set `DOCKER_SOCK_PATH=/var/run/docker.sock` |
-| Grafana dashboards show "No data" | generate traffic first (see §2 / `AWS_DEPLOYMENT.md` runbook), then check Prometheus `http://localhost:9090` for `centralwatch_*` series |
-| Tempo panels empty | traces are retained per the tempo config; re-run `/images/process` etc. and refresh |
-| `AUTH_TOKEN_SECRET` startup error | set the env var (dev: any value; prod: strong secret) |
-| Port already in use | change the host mapping in `docker-compose.yml` (`8000:8000` → `8010:8000`, …) |
-
-## 9. Project layout
+## 2. Directory Layout & Important Files
 
 ```
-├── demo-app/                    # FastAPI application (built by Docker, no pre-built image)
-│   ├── Dockerfile
-│   ├── entrypoint.sh
-│   ├── requirements.txt
-│   ├── .env.example
+API-Monitoring-/
+├── centralwatch-security/          # Standalone enterprise API security & proxy engine package
+│   ├── pyproject.toml              # Pinned build definition and package metadata
+│   └── centralwatch_security/
+│       ├── __init__.py             # Public exports: middleware, proxy store, security routers
+│       ├── middleware.py           # Generic IP CIDR allowlisting & token verification ASGI middleware
+│       ├── proxy_store.py          # Postgres-backed proxy store, KMS envelope cipher, HMAC audit logger
+│       └── routers.py              # Proxy reverse gateway, SSRF firewall, sliding rate limiter, circuit breaker
+│
+├── demo-app/                       # Main FastAPI business backend application
+│   ├── Dockerfile                  # Container build with Java runtime for OWASP scanner
+│   ├── requirements.txt            # Pinned dependencies for reproducible production builds
+│   ├── app/
+│   │   ├── main.py                 # ASGI application factory, lifespan management, router mounts
+│   │   ├── deps.py                 # Dependency injection: authentication and RBAC admin checks
+│   │   ├── models/                 # Domain dataclasses: user (with admin role), order, file
+│   │   ├── routes/                 # Endpoint routers: auth, orders, files, chat, security_agent, simulate
+│   │   ├── services/               # AWS service wrappers, security agent with CIS benchmark checks
+│   │   └── telemetry/              # OTel instrumentation, structured JSON logging, business spans
+│   └── tests/                      # Automated test suite
+│       ├── test_business_routes.py # E2E tests for auth, order creation, S3 files, and RBAC rejection
+│       ├── test_chat.py            # Gemini chatbot proxy contract tests
+│       └── test_security_agent.py  # AWS security baseline scanner tests
+│
+├── inventory-service/              # Downstream microservice for distributed trace demonstration
+│   ├── Dockerfile                  # Lightweight Python 3.12 alpine container
 │   └── app/
-│       ├── main.py              # app factory, middleware, exception handlers
-│       ├── deps.py              # DI container + auth dependency
-│       ├── config/              # pydantic-settings
-│       ├── routes/              # auth, orders, files, images, notifications, queue, simulate
-│       ├── services/            # boto3 clients + AWS resource manager + Lambda code
-│       ├── telemetry/           # instrumentation, logging, metrics, tracing
-│       ├── models/ schemas/ utils/
-├── configs/
-│   ├── collector/config.yaml    # OTel collector pipelines
-│   ├── prometheus/prometheus.yml
-│   ├── loki/loki-config.yaml
-│   ├── tempo/tempo.yaml
-│   ├── nginx/frontend.conf
-│   └── grafana/provisioning/    # datasources + 6 dashboards
-├── frontend/dist/               # unified CentralWatch control-plane dashboard
-├── scripts/                     # start.sh, stop.sh, healthcheck.sh
-├── docker-compose.yml           # dev stack (LocalStack)
-├── docker-compose.aws.yml       # production stack (real AWS)
-└── AWS_DEPLOYMENT.md            # resources, IAM, production runbook
+│       ├── main.py                 # FastAPI stock check endpoint reading W3C traceparent headers
+│       └── telemetry.py            # Microservice OpenTelemetry setup reporting to collector
+│
+├── traffic-generator/              # Autonomous continuous workload generator
+│   ├── Dockerfile                  # Background container runner
+│   ├── generator.py                # Concurrent workers generating auth, order, and simulation traffic
+│   └── requirements.txt            # Minimal HTTPX client dependencies
+│
+├── frontend/                       # Decoupled web client applications
+│   ├── platform/                   # CentralWatch Operator Console (served on :8080)
+│   │   ├── index.html              # Management UI (Overview, Proxy, Security scan, AWS agent, Observability)
+│   │   ├── app.js                  # Platform API integration and real-time health checks
+│   │   └── styles.css              # Dark/light theme design system
+│   └── demo/                       # Demo Business Application (served on :8090)
+│       ├── index.html              # End-user UI (Chatbot, Orders, Files, AWS workflows, Simulations)
+│       ├── app.js                  # Client state, auth token management, simulation runners
+│       └── styles.css              # Consistent theme styling
+│
+├── configs/                        # Unified service configurations
+│   ├── alertmanager/               # Alertmanager routing and webhook configurations
+│   ├── collector/                  # OpenTelemetry collector pipelines and processors
+│   ├── grafana/provisioning/       # Auto-provisioned datasources and production dashboards
+│   │   ├── dashboards/             # SLO, Services, Overview, API monitoring, Security, Traces, Logs
+│   │   └── datasources/yaml        # Loki derivedFields for one-click log-to-trace deep linking
+│   ├── loki/                       # Loki configuration with 7-day retention and compactor
+│   ├── nginx/                      # Separate reverse proxy configs: centralwatch.conf and demo.conf
+│   ├── prometheus/                 # Prometheus scrape configs and alerts.yml rule definitions
+│   └── tempo/                      # Tempo distributed tracing and block retention rules
+│
+├── deploy/k8s/                     # Production Kubernetes manifests
+│   ├── namespace.yaml              # Isolated `centralwatch` namespace
+│   ├── configmap.yaml              # Production environment configurations
+│   ├── deployment.yaml             # Deployments for demo-app, inventory, and dual nginx frontends
+│   ├── service.yaml                # ClusterIP services
+│   └── ingress.yaml                # NGINX Ingress Controller rules with TLS termination
+│
+├── migrations/                     # Database schema migrations
+│   └── 001_initial_proxy_schema.sql# PostgreSQL tables: proxy_services, roles, audit_logs, usage_history
+│
+├── examples/                       # Developer SDK and integration tooling
+│   ├── python_sdk_example.py       # Python SDK showing credential-less proxy calls with tracing
+│   ├── curl_examples.sh            # Complete bash cURL walk-through for CLI operators
+│   └── generate_openapi.py         # Static OpenAPI schema generation utility
+│
+├── Makefile                        # Command-line developer workflow orchestration
+├── docker-compose.yml              # LocalStack development multi-container composition
+├── docker-compose.aws.yml          # Production AWS multi-container composition
+├── progress.md                     # Detailed engineering tracking of all 6 production upgrade phases
+└── ARCHITECTURE_AND_IMPROVEMENTS.md# Deep technical architecture documentation and specifications
 ```
 
-## 10. CentralWatch Security Plugin
+---
 
-We provide an enterprise-grade API Security plugin built as a standalone Python package: `centralwatch-security`. This plugin provides:
-- **Hybrid Security Gateway:** Automatic IP CIDR whitelisting and API Key Revocation checks via a generic middleware.
-- **OWASP ASTF Scanner Trigger:** A built-in FastAPI router to trigger automated OWASP API Top 10 vulnerability scans (`/security-scan`).
-- **Managed API Proxy:** IP/CIDR-authorized upstream requests with server-side Bearer or API-key-header injection (`/proxy`).
-- **Telemetry Integration:** Automatic logging of security violations into OpenTelemetry traces and Loki.
+## 3. Production-Grade Features Implemented
 
-### Managed API proxy
+CentralWatch has been upgraded from a basic telemetry sample into an enterprise-grade platform across 6 major categories:
 
-The proxy dashboard is available at `http://127.0.0.1:8080/#proxy`. It registers an
-upstream base URL, secret key, caller allowlist, and service/method role through
-`POST /centralwatch/proxy/keys`. Registration returns a separate proxy access token
-once; CentralWatch stores only its SHA-256 hash. Applications call
-`/centralwatch/proxy/{service}/{path}` with that token in
-`X-CentralWatch-Proxy-Token`, without storing or sending the upstream key.
-`GET /centralwatch/proxy/keys` returns only masked key values and token hints.
+### 1. Security Basics (Must-Haves)
+* **RBAC & Admin Route Protection:** All proxy credential management routes require authentication and admin privileges (`is_admin: true` / `role: "admin"`). Non-admin users are rejected with `403 Forbidden`.
+* **SSRF (Server-Side Request Forgery) Firewall:** Pre-flight DNS resolution blocks requests to loopback (`127.0.0.0/8`, `::1`), private RFC1918 networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local IPs (`169.254.0.0/16`, `fe80::/10`), and cloud metadata services (`169.254.169.254`).
+* **AWS KMS & Key Rotation:** Master secrets support AWS KMS envelope encryption with annual rotation and automated database re-encryption (`rotate_master_encryption_key`).
+* **Tamper-Evident Audit Logging:** Every administrative action (`SERVICE_CREATED`, `TOKEN_ROTATED`, `ROLE_MODIFIED`) is signed using HMAC-SHA256 and stored in `proxy_audit_logs`.
+* **Sliding Rate Limiter & Budget Quotas:** Token and service quotas prevent downstream API exhaustion, returning standard HTTP 429 with `Retry-After` headers.
 
-The same dashboard displays sanitized API usage history and aggregate totals for
-requests, successes, policy blocks, errors, bytes, methods, status codes, average/P95
-latency, and per-service traffic. OpenTelemetry exports proxy request and duration
-metrics into the existing Prometheus pipeline.
+### 2. Alerting Pipeline
+* **Prometheus Alert Rules:** Pre-configured alerts for `HighErrorRate` (>5% 5xx for 2m), `HighLatencyP99` (>1000ms), `ServiceDown`, `ProxySecurityViolationsSpike`, and `SSRFBlockedAttempt`.
+* **Alertmanager Routing:** Automated deduplication, grouping, and webhook dispatching for critical alerts.
+* **Log-to-Trace Deep Links in Grafana:** Loki datasource configured with `derivedFields` regex matching `"trace_id"`, allowing one-click navigation directly from log lines into Tempo trace waterfalls.
 
-Upstream traffic uses one lifecycle-managed asynchronous HTTP client per application
-worker. Connections are pooled and reused by origin (up to 100 active connections and
-20 idle keep-alive connections, with a 30-second idle expiry), avoiding a new TCP/TLS
-setup for every proxied request. Each service's configured timeout still applies to
-every request, redirects remain disabled, and the pool closes cleanly on shutdown.
+### 3. Proxy Upgrades (Star Feature)
+* **Per-Service Budgets & Cost Tracking:** Automatic tracking of prompt and completion tokens for LLM providers (Gemini, Claude, OpenAI) with cost estimation per caller.
+* **Token Expiry & Schedules:** Proxy tokens enforce expiration (`token_expires_at`) with a single-click rotation endpoint.
+* **Secret Redaction:** Outbound logs and audit records automatically scrub sensitive headers (`Authorization`, `x-goog-api-key`, `api-key`, `cookie`).
+* **Resilience Mechanisms:** Sliding TTL response caching for idempotent GETs, exponential retries on upstream 5xx errors, and an in-memory circuit breaker that trips after 5 consecutive failures.
+* **Multi-Key Failover:** Configurable secondary upstream keys that automatically activate when an upstream provider returns HTTP 429 (quota exhausted).
 
-Registrations, roles, and token hashes are persisted in CentralWatch's PostgreSQL
-database. Upstream API keys are encrypted with AES-256-GCM in the application before
-they are stored; the encryption key is supplied separately through
-`PROXY_SECRET_ENCRYPTION_KEY`. Sanitized usage history remains in process memory.
-The local demo exposes management without a CentralWatch bearer token so the dashboard
-works immediately. Add administrative authentication before exposing management
-endpoints to a network. See `PROXY_FEATURE_TESTING.md` for the tested Docker workflow,
-key-management requirements, and Docker Desktop loopback behavior.
+### 4. Reliability and Scale
+* **PostgreSQL State Persistence:** Replaced in-memory usage dictionaries with persistent tables (`proxy_services`, `proxy_roles`, `proxy_usage_history`, `proxy_audit_logs`) enabling horizontal multi-worker scaling.
+* **Async Boto3 Operations:** Wrapped DynamoDB calls in `asyncio.to_thread` across auth and orders routes to eliminate event loop blocking.
+* **Database Migrations:** Schema migrations managed via versioned SQL scripts in `migrations/`.
+* **Kubernetes Manifests & Retention Policies:** Production Kubernetes manifests in `deploy/k8s/` and enforced 7-day Loki / 48-hour Tempo retention limits.
 
-### Gemini chatbot
+### 5. Security Depth (CSPM / SIEM)
+* **CloudTrail Multi-Region Ingestion:** Verifies active multi-region logging mapped to CIS AWS Benchmark 3.1.
+* **CIS Benchmark-Mapped CSPM Checks:** Evaluates IAM root account keys (CIS 1.4), S3 default encryption & public blocks (CIS 2.1.1, 2.1.5), unrestricted security groups (CIS 5.2), and KMS key rotation (CIS 3.8).
+* **SIEM Threat Correlation Engine:** Flags brute-force token harvesting and reconnaissance scans.
+* **Compliance Scoring & Trend History:** Computes real-time compliance scores (0–100%) stored with historical timestamp trends.
 
-Open `http://127.0.0.1:8080/#chat` to configure and use the demo chatbot. The
-predefined `gemini_chat` role permits only POST requests to the `gemini_api`
-service. The Gemini key is stored by CentralWatch, while the demo application
-uses a separate proxy token. CentralWatch injects the key as `x-goog-api-key`
-and returns Gemini's generated text through `POST /chat`. See
-`GEMINI_CHATBOT.md` for setup and security boundaries.
+### 6. Engineering Hygiene
+* **CI/CD Automation:** GitHub Actions workflows (`.github/workflows/ci.yml` and `security-scan.yml`) with Python 3.12, linting, security tests, and container builds.
+* **Business-Route Tests:** Comprehensive test suite in `demo-app/tests/test_business_routes.py` covering auth, orders, files, and RBAC rejection.
+* **Developer SDK & OpenAPI Spec:** Standalone Python client SDK, bash cURL examples, and automated OpenAPI specification generator in `examples/`.
 
-### Installation
-You can install the plugin in any FastAPI project locally:
-```bash
-pip install -e ./centralwatch-security
-```
+---
 
-### Running the ASTF scan in CentralWatch
+## 4. Quick Start & Developer Workflow
 
-In the Docker image, the scanner runtime includes Java and `curl`. The first scan
-downloads the official OWASP ASTF v2.0.1 JAR. A scan runs synchronously and the API
-returns success only after ASTF has completed and written a non-empty HTML report.
-
-The CentralWatch application protects this endpoint with the same bearer-token and
-CIDR enforcement as the other business endpoints:
-
-For the normal dashboard flow, open
-`http://127.0.0.1:8080/#security-scan`, create or sign in to an operator
-session, and select **Trigger security scan**. When it finishes, select
-**Open HTML report**. The Security Grafana dashboard's scan button opens this
-same authenticated control.
-
-The equivalent CLI flow is:
-
-```bash
-TOKEN=$(curl -s -X POST http://127.0.0.1:8000/auth/login \
-   -H 'Content-Type: application/json' \
-   -d '{"email":"alice@example.com","password":"secret123"}' \
-   | python -c "import sys,json;print(json.load(sys.stdin)['token'])")
-
-curl -s -X POST \
-   'http://127.0.0.1:8000/centralwatch/security-scan?target_url=http://127.0.0.1:8000' \
-   -H "Authorization: Bearer $TOKEN"
-```
-
-The scanner is configured via environment variables on the `demo-app` service
-(`ASTF_SCRIPT_PATH`, `ASTF_REPORT_PATH`, `ASTF_SCAN_TIMEOUT_SECONDS`); both
-`docker-compose.yml` and `docker-compose.aws.yml` ship sensible defaults.
-
-The **Threat Scanner Control Panel** on the *Security & Threat Intelligence*
-Grafana dashboard does the same thing from the UI: it has a **Trigger Scan**
-button that prompts for an admin bearer token and calls the endpoint. Because
-the panel runs inline JavaScript, Grafana must be started with
-`GF_PANELS_DISABLE_SANITIZE_HTML=true` (set in both compose files) — without it
-the button renders but Grafana strips the `<script>`, so nothing fires.
-
-The report is generated inside the demo-app container at
-`/app/reports/security-report.html`. ASTF exit code `0` means no findings; exit code
-`1` means the scan completed with findings. Both are successful scan executions when
-the report exists and is non-empty. Download, Java, execution, timeout, exit code `2+`,
-missing-report, and empty-report failures return an error response.
-
-Verify the generated report:
+### Using the Makefile (Recommended)
 
 ```bash
-docker exec centralwatch-demo-app sh -c "ls -lah /app/reports/"
-docker exec centralwatch-demo-app sh -c \
-   "test -s /app/reports/security-report.html && echo 'REPORT EXISTS'"
+# Display all available developer commands
+make help
+
+# Build and start all 12 services
+make up
+
+# Verify end-to-end health across all services
+make health
+
+# View live traffic generator logs
+make traffic
+
+# Run automated test suite
+make test
+
+# Shut down all services
+make down
 ```
 
-The authenticated dashboard retrieves the report through
-`GET /centralwatch/security-scan/report`. You can also copy it directly from the
-container. On Windows, run this from the repository root to save it as
-`D:\API-Monitoring--1\security-report.html`:
+### Manual Docker Compose
 
-```powershell
-docker cp centralwatch-demo-app:/app/reports/security-report.html .\security-report.html
+```bash
+# Build and run in detached mode
+docker compose up -d --build
+
+# Run the comprehensive health check script
+./scripts/healthcheck.sh
 ```
 
-You can then open `security-report.html` locally with a browser or inspect its first
-lines with:
+---
 
-```powershell
-Get-Content .\security-report.html -TotalCount 20
-```
+## 5. Endpoints & Access Points
 
-### Usage in FastAPI
-In your FastAPI application (`main.py`):
-```python
-from fastapi import FastAPI, Request
-from centralwatch_security import SecurityEnforcementMiddleware, create_security_router
-
-app = FastAPI()
-
-# 1. Define how your app retrieves policies (from a DB like DynamoDB or Postgres)
-async def fetch_user_security_policy(request: Request):
-    # Retrieve user token from header, fetch from DB
-    # Example return format:
-    return {
-        "status": "ACTIVE",              # or "REVOKED"
-        "allowed_cidrs": ["10.0.0.0/8"], # list of allowed IPs
-        "user_id": "usr_123"
-    }
-
-# 2. Attach the Middleware
-app.add_middleware(
-    SecurityEnforcementMiddleware, 
-    get_policy_callback=fetch_user_security_policy
-)
-
-# 3. Mount the OWASP Scanner Endpoint.
-#    create_security_router() keeps the plugin decoupled from your app: pass a
-#    callable that resolves a bearer token to a user (None/falsy => invalid).
-#    The default ASTF paths/timeout come from ASTF_SCRIPT_PATH,
-#    ASTF_REPORT_PATH and ASTF_SCAN_TIMEOUT_SECONDS env vars.
-def resolve_token_user(token: str):
-    return users_service.get_profile(token)  # your auth lookup
-
-app.include_router(
-    create_security_router(get_token_user=resolve_token_user),
-    prefix="/centralwatch",
-)
-```
-> **Backwards compatibility:** a module-level `security_router` is still exported
-> (`from centralwatch_security import security_router`). When used without an
-> explicit resolver it looks for `app.state.container.auth.get_profile(token)` and
-> returns `501` with a clear message if that structure is absent — prefer the
-> factory form above in new integrations.
-
-The scan trigger is **POST-only** (`POST /centralwatch/security-scan?target_url=...`)
-so a browser/prefetch cannot accidentally re-trigger a multi-minute scanner run via
-`GET`. The validated bearer token is forwarded to ASTF for authenticated checks.
-
-### Testing the Plugin
-To test the plugin locally:
-1. Ensure the package is installed: `pip install -e centralwatch-security`.
-2. Start your FastAPI server.
-3. Make a request from an IP address not listed in `allowed_cidrs` (e.g., `192.168.1.5`).
-4. You will receive a `403 Forbidden` with the message: `Access denied: IP outside allowed subnet`.
-5. Check your Loki logs and OpenTelemetry traces to see the generated `IP_SUBNET_VIOLATION` security event.
+* **CentralWatch Platform Console:** `http://localhost:8080`
+* **Demo Business Application:** `http://localhost:8090`
+* **Demo API Swagger Documentation:** `http://localhost:8000/docs`
+* **Inventory Microservice API:** `http://localhost:8001/docs`
+* **Grafana Dashboards:** `http://localhost:3000` (User: `admin`, Password: `admin`)
+* **Prometheus Targets & Alerts:** `http://localhost:9090`
+* **Alertmanager UI:** `http://localhost:9093`
+* **Loki Log Aggregator:** `http://localhost:3100`
+* **Tempo Tracing Engine:** `http://localhost:3200`
+* **LocalStack Gateway:** `http://localhost:4566`

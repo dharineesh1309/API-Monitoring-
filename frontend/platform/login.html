@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign In — CentralWatch Platform</title>
+  <meta name="description" content="CentralWatch Mission-Critical API Security & Operations Console">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=centralwatch-v4-login">
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: radial-gradient(circle at 50% 20%, rgba(14, 165, 233, 0.08), transparent 70%), var(--bg, #0b0f17);
+    }
+    .login-container {
+      width: 100%;
+      max-width: 440px;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .login-card {
+      padding: 32px 28px;
+      background: var(--surface, #111827);
+      border: 1px solid var(--border, #1f2937);
+      border-radius: 12px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45);
+    }
+    .brand-mark {
+      width: 52px;
+      height: 52px;
+      font-size: 26px;
+      margin: 0 auto 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #fff;
+      border-radius: 12px;
+      font-weight: 700;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.35);
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text, #e2e8f0);
+    }
+    .form-group input {
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .login-footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.82rem;
+      color: var(--text-muted, #94a3b8);
+    }
+    .login-footer a {
+      color: #38bdf8;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-card">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div class="brand-mark">C</div>
+        <h1 style="font-size: 1.5rem; margin: 0 0 6px; font-weight: 700;">CentralWatch Platform</h1>
+        <p style="color: var(--text-muted, #94a3b8); font-size: 0.88rem; margin: 0 0 12px;">Mission-Critical API Security & Operations Console</p>
+        <div>
+          <span style="background: rgba(14,165,233,0.12); color: #38bdf8; border: 1px solid rgba(14,165,233,0.25); font-size: 0.78rem; padding: 4px 12px; border-radius: 999px; font-weight: 500;">
+            Administrator Authentication
+          </span>
+        </div>
+      </div>
+
+      <form class="form" id="login-form">
+        <div class="form-group">
+          <label for="login-email">Admin Email</label>
+          <input id="login-email" name="email" type="email" autocomplete="username" required placeholder="name@company.com">
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••••••">
+        </div>
+        <button class="button primary" id="login-submit" type="submit" style="width: 100%; margin-top: 10px; padding: 10px; font-weight: 600;">
+          Sign in to CentralWatch
+        </button>
+        <p class="form-message" id="login-message" role="status" style="margin-top: 12px; text-align: center;"></p>
+      </form>
+
+      <div class="login-footer">
+        Client Applications: <a href="http://localhost:8090" target="_blank" rel="noopener">Demo Business Application (:8090) ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = "cw-token";
+
+    function setMessage(el, text, isError = false) {
+      if (!el) return;
+      el.textContent = text;
+      el.className = `form-message ${isError ? "error" : "success"}`;
+    }
+
+    // Check if already authenticated
+    (async function checkExistingAuth() {
+      const token = localStorage.getItem("cw-token") || localStorage.getItem("centralwatch_token");
+      if (!token) return;
+      try {
+        const res = await fetch("/api/auth/profile", {
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (res.ok) {
+          window.location.replace("/index.html#overview");
+        } else {
+          localStorage.removeItem("cw-token");
+          localStorage.removeItem("centralwatch_token");
+        }
+      } catch (_) {
+        // stay on login page
+      }
+    })();
+
+    const form = document.getElementById("login-form");
+    const submitBtn = document.getElementById("login-submit");
+    const messageEl = document.getElementById("login-message");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("login-email").value.trim().toLowerCase();
+      const password = document.getElementById("login-password").value;
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Authenticating…";
+      setMessage(messageEl, "");
+
+      try {
+        let res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+
+        // If account doesn't exist yet on first launch, auto-register with provided credentials
+        if (!res.ok && res.status === 401) {
+          const regRes = await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: email,
+              password: password,
+              name: "CentralWatch Admin",
+              allowed_cidrs: ["0.0.0.0/0", "::/0"]
+            })
+          });
+          if (regRes.ok) {
+            res = await fetch("/api/auth/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, password })
+            });
+          }
+        }
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.error || "Invalid operator credentials");
+        }
+
+        localStorage.setItem("cw-token", data.token);
+        localStorage.setItem("centralwatch_token", data.token);
+        setMessage(messageEl, `Signed in as ${data.user?.name || "Administrator"}. Redirecting…`);
+        window.location.replace("/index.html#overview");
+      } catch (err) {
+        setMessage(messageEl, err.message, true);
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Sign in to CentralWatch";
+      }
+    });
+  </script>
+</body>
+</html>

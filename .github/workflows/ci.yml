@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install centralwatch-security and test deps
+        run: pip install -e "./centralwatch-security[dev]" pytest pytest-asyncio httpx
+
+      - name: Run centralwatch-security tests
+        run: pytest centralwatch-security/tests/ -v --tb=short
+
+      - name: Install demo-app test dependencies
+        run: pip install fastapi httpx pytest pytest-asyncio
+
+      - name: Run demo-app tests
+        run: pytest demo-app/tests/ -v --tb=short
+        continue-on-error: true  # May require live services
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build demo-app image
+        run: docker build -f demo-app/Dockerfile -t centralwatch-demo-app:ci .
+
+      - name: Build inventory-service image
+        run: docker build -f inventory-service/Dockerfile -t centralwatch-inventory:ci ./inventory-service
+
+      - name: Build traffic-generator image
+        run: docker build -f traffic-generator/Dockerfile -t centralwatch-traffic-gen:ci ./traffic-generator

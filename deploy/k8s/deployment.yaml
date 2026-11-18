@@ -1,0 +1,153 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: centralwatch-demo-app
+  namespace: centralwatch
+  labels:
+    app: centralwatch-demo-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: centralwatch-demo-app
+  template:
+    metadata:
+      labels:
+        app: centralwatch-demo-app
+    spec:
+      containers:
+        - name: demo-app
+          image: centralwatch/demo-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: centralwatch-config
+          env:
+            - name: CENTRALWATCH_PROXY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: centralwatch-secrets
+                  key: proxy-master-key
+            - name: CENTRALWATCH_PROXY_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: centralwatch-secrets
+                  key: db-password
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: centralwatch-inventory
+  namespace: centralwatch
+  labels:
+    app: centralwatch-inventory
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: centralwatch-inventory
+  template:
+    metadata:
+      labels:
+        app: centralwatch-inventory
+    spec:
+      containers:
+        - name: inventory-service
+          image: centralwatch/inventory-service:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://centralwatch-otel-collector:4317"
+            - name: SERVICE_NAME
+              value: "centralwatch-inventory"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 3
+            periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: centralwatch-platform-ui
+  namespace: centralwatch
+  labels:
+    app: centralwatch-platform-ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: centralwatch-platform-ui
+  template:
+    metadata:
+      labels:
+        app: centralwatch-platform-ui
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: centralwatch-nginx-conf
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: centralwatch-demo-ui
+  namespace: centralwatch
+  labels:
+    app: centralwatch-demo-ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: centralwatch-demo-ui
+  template:
+    metadata:
+      labels:
+        app: centralwatch-demo-ui
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: centralwatch-demo-nginx-conf
+

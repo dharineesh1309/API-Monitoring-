@@ -40,7 +40,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Traces containing S3 spans: S3.PutObject, S3.DeleteObject, S3.ListBuckets.",
       "fieldConfig": {
@@ -67,7 +67,31 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Trace Details in Explore",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-aws-services/centralwatch-e28094-aws-services?${__url_time_range}&var-traceId=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -76,12 +100,7 @@
         "y": 1
       },
       "id": 2,
-      "links": [
-        {
-          "title": "Open trace in waterfall",
-          "url": "/d/centralwatch-aws-services?var-traceId=${__value.raw}"
-        }
-      ],
+      "links": [],
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -105,9 +124,9 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"S3.PutObject|S3.DeleteObject|S3.ListBuckets\" } | select(name, status, duration)",
+          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"S3.PutObject|S3.DeleteObject|S3.ListBuckets\" }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -118,7 +137,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Traces containing Lambda.Invoke spans.",
       "fieldConfig": {
@@ -145,7 +164,31 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Trace Details in Explore",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-aws-services/centralwatch-e28094-aws-services?${__url_time_range}&var-traceId=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -154,12 +197,7 @@
         "y": 1
       },
       "id": 3,
-      "links": [
-        {
-          "title": "Open trace in waterfall",
-          "url": "/d/centralwatch-aws-services?var-traceId=${__value.raw}"
-        }
-      ],
+      "links": [],
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -183,9 +221,9 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { name = \"Lambda.Invoke\" } | select(name, status, duration)",
+          "query": "{ resource.service.name =~ \"$service\" } && { name = \"Lambda.Invoke\" }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -196,7 +234,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Traces containing SNS publish spans (this botocore version names SNS producers \"centralwatch-notifications send\").",
       "fieldConfig": {
@@ -223,7 +261,31 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Trace Details in Explore",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-aws-services/centralwatch-e28094-aws-services?${__url_time_range}&var-traceId=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -232,12 +294,7 @@
         "y": 11
       },
       "id": 4,
-      "links": [
-        {
-          "title": "Open trace in waterfall",
-          "url": "/d/centralwatch-aws-services?var-traceId=${__value.raw}"
-        }
-      ],
+      "links": [],
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -261,9 +318,9 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"centralwatch-.* send\" } | select(name, status, duration)",
+          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"centralwatch-.* send\" }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -274,7 +331,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Traces containing SQS spans: SQS.SendMessage, SQS.ReceiveMessage, SQS.DeleteMessageBatch.",
       "fieldConfig": {
@@ -301,7 +358,31 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Trace Details in Explore",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-aws-services/centralwatch-e28094-aws-services?${__url_time_range}&var-traceId=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -310,12 +391,7 @@
         "y": 11
       },
       "id": 5,
-      "links": [
-        {
-          "title": "Open trace in waterfall",
-          "url": "/d/centralwatch-aws-services?var-traceId=${__value.raw}"
-        }
-      ],
+      "links": [],
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -339,9 +415,9 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"SQS.SendMessage|SQS.ReceiveMessage|SQS.DeleteMessageBatch\" } | select(name, status, duration)",
+          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"SQS.SendMessage|SQS.ReceiveMessage|SQS.DeleteMessageBatch\" }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -352,7 +428,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Traces containing DynamoDB spans: DynamoDB.PutItem, DynamoDB.GetItem, DynamoDB.Query, DynamoDB.Scan, DynamoDB.DeleteItem.",
       "fieldConfig": {
@@ -379,7 +455,31 @@
           },
           "unit": "ms"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "traceID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View Trace Details in Explore",
+                    "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+                    "targetBlank": true
+                  },
+                  {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-aws-services/centralwatch-e28094-aws-services?${__url_time_range}&var-traceId=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 10,
@@ -388,12 +488,7 @@
         "y": 21
       },
       "id": 6,
-      "links": [
-        {
-          "title": "Open trace in waterfall",
-          "url": "/d/centralwatch-aws-services?var-traceId=${__value.raw}"
-        }
-      ],
+      "links": [],
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -417,9 +512,9 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"DynamoDB.PutItem|DynamoDB.GetItem|DynamoDB.Query|DynamoDB.Scan|DynamoDB.DeleteItem\" } | select(name, status, duration)",
+          "query": "{ resource.service.name =~ \"$service\" } && { name =~ \"DynamoDB.PutItem|DynamoDB.GetItem|DynamoDB.Query|DynamoDB.Scan|DynamoDB.DeleteItem\" }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -430,7 +525,7 @@
     {
       "datasource": {
         "type": "tempo",
-        "uid": "${DS_TEMPO}"
+        "uid": "tempo"
       },
       "description": "Full waterfall of the trace selected via the $traceId variable. Select a trace by clicking any row in the AWS tables above (fills $traceId), or type a Trace ID directly into the variable.",
       "fieldConfig": {
@@ -463,10 +558,10 @@
         {
           "datasource": {
             "type": "tempo",
-            "uid": "${DS_TEMPO}"
+            "uid": "tempo"
           },
-          "query": "{ resource.service.name =~ \"$service\" } && { trace:id = \"${traceId}\" }",
-          "queryType": "traceql",
+          "query": "${traceId}",
+          "queryType": "traceId",
           "refId": "A"
         }
       ],
@@ -527,18 +622,18 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "00000000000000000000000000000000",
-          "value": "00000000000000000000000000000000"
+          "selected": true,
+          "text": "db094fa551d3fed3c50b15a3144cb21c",
+          "value": "db094fa551d3fed3c50b15a3144cb21c"
         },
         "hide": 0,
         "label": "Trace ID",
         "name": "traceId",
         "options": [
           {
-            "selected": false,
-            "text": "00000000000000000000000000000000",
-            "value": "00000000000000000000000000000000"
+            "selected": true,
+            "text": "db094fa551d3fed3c50b15a3144cb21c",
+            "value": "db094fa551d3fed3c50b15a3144cb21c"
           }
         ],
         "query": "",
@@ -553,7 +648,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "CentralWatch — AWS Services",
+  "title": "CentralWatch \u2014 AWS Services",
   "uid": "centralwatch-aws-services",
   "version": 1,
   "weekStart": ""

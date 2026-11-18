@@ -687,8 +687,8 @@ function useGeminiProxyToken(event) {
   event.preventDefault();
   const token = $("#gemini-proxy-token").value.trim();
   const message = $("#gemini-token-message");
-  if (!token.startsWith("cw_proxy_")) {
-    setMessage(message, "Enter a CentralWatch token beginning with cw_proxy_.", true);
+  if (!token.startsWith("cw_")) {
+    setMessage(message, "Enter a valid CentralWatch token beginning with cw_ (e.g. cw_proxy_ or cw_role_).", true);
     return;
   }
   setGeminiProxyToken(token);

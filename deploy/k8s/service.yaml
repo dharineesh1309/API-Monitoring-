@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: centralwatch-demo-app
+  namespace: centralwatch
+spec:
+  selector:
+    app: centralwatch-demo-app
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: centralwatch-inventory
+  namespace: centralwatch
+spec:
+  selector:
+    app: centralwatch-inventory
+  ports:
+    - port: 8001
+      targetPort: 8001
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: centralwatch-platform-ui
+  namespace: centralwatch
+spec:
+  selector:
+    app: centralwatch-platform-ui
+  ports:
+    - port: 8080
+      targetPort: 80
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: centralwatch-demo-ui
+  namespace: centralwatch
+spec:
+  selector:
+    app: centralwatch-demo-ui
+  ports:
+    - port: 8090
+      targetPort: 80
+      name: http
+

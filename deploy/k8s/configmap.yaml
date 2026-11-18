@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: centralwatch-config
+  namespace: centralwatch
+data:
+  APP_ENV: "production"
+  SERVICE_NAME: "centralwatch-demo-app"
+  SERVICE_VERSION: "1.0.0"
+  AWS_REGION: "us-east-1"
+  AWS_PROVISION_RESOURCES: "false"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://centralwatch-otel-collector:4317"
+  CENTRALWATCH_PROXY_DB_HOST: "centralwatch-postgres"
+  CENTRALWATCH_PROXY_DB_PORT: "5432"
+  CENTRALWATCH_PROXY_DB_NAME: "centralwatch"
+  CENTRALWATCH_PROXY_DB_USER: "centralwatch"
+  INVENTORY_SERVICE_URL: "http://centralwatch-inventory:8001"
+

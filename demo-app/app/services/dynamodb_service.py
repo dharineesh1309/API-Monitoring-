@@ -50,8 +50,14 @@ class DynamoDBService:
         self.client.delete_item(TableName=table, Key=_to_typed(key))
 
     def scan(self, table: str, limit: int = 100) -> list[dict]:
-        resp = self.client.scan(TableName=table, Limit=limit)
-        return [_from_typed(item) for item in resp.get("Items", [])]
+        items = []
+        paginator = self.client.get_paginator("scan")
+        for page in paginator.paginate(TableName=table):
+            for item in page.get("Items", []):
+                items.append(_from_typed(item))
+                if len(items) >= limit:
+                    return items
+        return items
 
     def query_by_email(self, email: str) -> dict | None:
         """Look up a user by email using the email-index GSI."""

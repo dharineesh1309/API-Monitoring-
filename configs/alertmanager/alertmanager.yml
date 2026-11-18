@@ -1,0 +1,25 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'severity']
+  group_wait: 5s
+  group_interval: 15s
+  repeat_interval: 1h
+  routes:
+    - match:
+        severity: critical
+      receiver: 'security-critical'
+      continue: true
+
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://demo-app:8000/healthz'
+        send_resolved: true
+
+  - name: 'security-critical'
+    webhook_configs:
+      - url: 'http://demo-app:8000/healthz'
+        send_resolved: true

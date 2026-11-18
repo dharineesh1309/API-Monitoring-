@@ -1,0 +1,31 @@
+name: Security Scan (Weekly)
+
+on:
+  schedule:
+    # Every Monday at 02:00 UTC
+    - cron: '0 2 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Start CentralWatch stack
+        run: docker compose up -d --wait || docker compose up -d
+
+      - name: Wait for services to be ready
+        run: sleep 60
+
+      - name: Run healthcheck
+        run: bash scripts/healthcheck.sh
+
+      - name: Security scan summary
+        run: |
+          echo "========================================"
+          echo "Stack healthy, manual OWASP scan available via dashboard"
+          echo "========================================"

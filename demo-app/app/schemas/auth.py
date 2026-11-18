@@ -35,6 +35,8 @@ class UserOut(BaseModel):
     created_at: str
     status: str
     allowed_cidrs: list[str]
+    role: str = "user"
+    is_admin: bool = False
 
 
 class LoginResponse(BaseModel):
