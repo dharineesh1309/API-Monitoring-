@@ -386,6 +386,26 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Traffic Generator — autonomous background workload generator
+  traffic-generator:
+    build:
+      context: ./traffic-generator
+      dockerfile: Dockerfile
+    image: centralwatch-traffic-gen:local
+    container_name: centralwatch-traffic-gen
+    restart: unless-stopped
+    environment:
+      - DEMO_APP_URL=http://demo-app:8000
+    depends_on:
+      - demo-app
+    networks:
+      - centralwatch-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   # One explicitly named bridge network shared by EVERY service, so the demo
   # app can resolve otel-collector and localstack by service name and the
