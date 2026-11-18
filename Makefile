@@ -30,7 +30,7 @@ up:
 ## up-aws: Start CentralWatch stack (AWS mode)
 up-aws:
 	@echo "Starting CentralWatch stack (AWS mode)..."
-	docker compose -f docker-compose.aws.yml up -d --build
+	docker compose -f docker-compose.yml -f docker-compose.aws.yml --env-file .env up -d --build
 
 ## down: Stop and remove containers
 down:

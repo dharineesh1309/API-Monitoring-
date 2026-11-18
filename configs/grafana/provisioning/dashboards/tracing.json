@@ -78,14 +78,14 @@
                 "id": "links",
                 "value": [
                   {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}&kiosk",
+                    "targetBlank": false
+                  },
+                  {
                     "title": "View Trace Details in Explore",
                     "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
                     "targetBlank": true
-                  },
-                  {
-                    "title": "Open Trace in Waterfall Panel",
-                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}",
-                    "targetBlank": false
                   }
                 ]
               }
@@ -183,14 +183,14 @@
                 "id": "links",
                 "value": [
                   {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}&kiosk",
+                    "targetBlank": false
+                  },
+                  {
                     "title": "View Trace Details in Explore",
                     "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
                     "targetBlank": true
-                  },
-                  {
-                    "title": "Open Trace in Waterfall Panel",
-                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}",
-                    "targetBlank": false
                   }
                 ]
               }
@@ -264,12 +264,19 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 10,
+        "h": 12,
         "w": 24,
         "x": 0,
         "y": 11
       },
       "id": 4,
+      "links": [
+        {
+          "title": "Open Trace in Explore",
+          "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${traceId}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
+          "targetBlank": true
+        }
+      ],
       "options": {},
       "targets": [
         {
@@ -278,7 +285,7 @@
             "uid": "tempo"
           },
           "query": "${traceId}",
-          "queryType": "traceId",
+          "queryType": "traceql",
           "refId": "A"
         }
       ],
@@ -340,14 +347,14 @@
                 "id": "links",
                 "value": [
                   {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}&kiosk",
+                    "targetBlank": false
+                  },
+                  {
                     "title": "View Trace Details in Explore",
                     "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
                     "targetBlank": true
-                  },
-                  {
-                    "title": "Open Trace in Waterfall Panel",
-                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}",
-                    "targetBlank": false
                   }
                 ]
               }
@@ -437,14 +444,14 @@
                 "id": "links",
                 "value": [
                   {
+                    "title": "Open Trace in Waterfall Panel",
+                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}&kiosk",
+                    "targetBlank": false
+                  },
+                  {
                     "title": "View Trace Details in Explore",
                     "url": "/explore?left=%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%7B%22query%22:%22${__value.raw}%22,%22queryType%22:%22traceId%22%7D%5D%7D",
                     "targetBlank": true
-                  },
-                  {
-                    "title": "Open Trace in Waterfall Panel",
-                    "url": "/d/centralwatch-tracing/centralwatch-e28094-tracing?${__url_time_range}&var-traceId=${__value.raw}",
-                    "targetBlank": false
                   }
                 ]
               }
