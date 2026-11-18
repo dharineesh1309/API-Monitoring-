@@ -118,6 +118,32 @@ Tracking the implementation of production-grade features across security, observ
   - Sanitized API key inputs with whitespace trimming to prevent HTTP header illegal character errors (`httpx.LocalProtocolError`).
   - Updated default Gemini model to active and supported `gemini-2.5-flash` on `v1beta`.
 
+- [x] **Quarantined IP Management & Dynamic Firewall Auto-Defense:**
+  - Added `proxy_quarantined_ips` table in PostgreSQL with in-memory caching set for zero-overhead request filtering.
+  - Intercepted proxy requests before IP whitelist checks to instantly reject quarantined IPs with HTTP 403 and `outcome: blocked_quarantine`.
+  - Added dedicated **Quarantined & Blocked IPs** management card on CentralWatch Platform UI (`http://localhost:8080/#proxy`).
+  - Implemented one-click **Unblock IP** functionality with tamper-evident audit logging.
+  - Wired `/simulate/brute-force` to quarantine attacker IP `198.51.100.42` and dispatch critical Alertmanager notifications.
+
+- [x] **Cryptographic Random Tokens & Zero-Trust RBAC Enforcement:**
+  - Upgraded proxy role token generation to high-entropy 24-byte URL-safe base64 strings (`cw_role_<random>`).
+  - Added `get_role_by_token_hash` in `PostgresProxyStore` for dynamic token-to-role authentication.
+  - Enforced strict RBAC: roles without permissions for a service (e.g. `non_chat_role`) return HTTP 403 with `blocked_role` audit records.
+  - Implemented administrator password verification modal for revealing service and role proxy tokens.
+  - Fixed token wiping bug in `updateGeminiStatus()` so loaded proxy tokens stay persistently active in the session.
+
+- [x] **Linux Host LocalStack AWS Lambda Environment:**
+  - Fixed LocalStack Lambda `State: Failed` error on Linux hosts by setting `DOCKER_SOCK_PATH=/var/run/docker.sock` in `.env` and `docker-compose.yml`.
+  - Verified asynchronous **S3 ➔ Lambda ➔ SNS** image processing pipeline (`centralwatch-image-processor`) with full trace propagation.
+
+- [x] **Seamless Grafana Trace Details & Anonymous Admin Access:**
+  - Configured `GF_AUTH_ANONYMOUS_ORG_ROLE=Admin` in `docker-compose.yml` to eliminate login redirects when accessing Explore or traces.
+  - Upgraded trace data links in `tracing.json` and `aws-services.json` to open complete trace waterfalls, span tags, and Loki logs directly in Grafana Tempo.
+
+- [x] **Managed Autonomous Traffic Generator:**
+  - Re-integrated `traffic-generator` into `docker-compose.yml` and attached it to `centralwatch-network`.
+  - Documented start/stop operations via `docker compose start/stop traffic-generator`.
+
 ---
 
 ## Architecture & File Mapping Reference

@@ -32,22 +32,23 @@ The architecture strictly separates the **CentralWatch Management Platform** (`:
 
 ## 1. System Port & Service Architecture
 
-CentralWatch runs 12 integrated services on a dedicated Docker network (`centralwatch-network`):
+CentralWatch runs 13 integrated services on a dedicated Docker network (`centralwatch-network`):
 
 | Service | Container | Host Port | Purpose & Architectural Role |
 | :--- | :--- | :--- | :--- |
-| **Platform UI** | `centralwatch-frontend` | `8080` | Dedicated operations portal: Overview, Proxy, ASTF Scanner, AWS CSPM, Observability |
-| **Demo Application** | `centralwatch-demo-frontend` | `8090` | Client portal: Gemini Chatbot, Orders, S3 Files, AWS Workflows, Simulations |
+| **Platform UI** | `centralwatch-frontend` | `8080` | Dedicated operations portal: Overview, Proxy, Quarantined IPs, ASTF Scanner, AWS CSPM, Observability |
+| **Demo Application** | `centralwatch-demo-frontend` | `8090` | Client portal: Gemini Chatbot, Orders, S3 Files, Lambda Image Processing, AWS Workflows, Simulations |
 | **Demo API Backend** | `centralwatch-demo-app` | `8000` | FastAPI core service emitting rich OpenTelemetry logs, metrics, and traces |
 | **Inventory Microservice** | `centralwatch-inventory` | `8001` | Downstream microservice for multi-hop distributed tracing via W3C TraceContext |
 | **Traffic Generator** | `centralwatch-traffic-gen` | *background* | Continuous autonomous workload generator exercising auth, orders, and traces |
-| **PostgreSQL Proxy DB** | `centralwatch-proxy-db` | *internal:5432* | Tamper-evident audit logs, encrypted proxy secrets, multi-worker persistent state |
-| **Prometheus** | `centralwatch-prometheus` | `9090` | Metrics time-series database with automated SLO & alert evaluation |
+| **PostgreSQL Proxy DB** | `centralwatch-proxy-db` | *internal:5432* | Tamper-evident audit logs, encrypted proxy secrets, quarantined IPs, multi-worker persistent state |
+| **Redis Cache** | `centralwatch-redis` | *internal:6379* | Fast in-memory cache for token sliding rate limits and session management |
+| **Prometheus** | `centralwatch-prometheus` | `9091` | Metrics time-series database with automated SLO & alert evaluation |
 | **Alertmanager** | `centralwatch-alertmanager` | `9093` | Alert grouping, deduplication, and notification routing (Slack / Webhook) |
-| **Grafana** | `centralwatch-grafana` | `3000` | Pre-provisioned dashboards with direct Loki-to-Tempo log-to-trace navigation |
+| **Grafana** | `centralwatch-grafana` | `3000` | Dashboards & Tempo Trace Explorer with zero-friction anonymous admin access |
 | **Loki** | `centralwatch-loki` | `3100` | High-efficiency structured log aggregation with 7-day retention policy |
 | **Tempo** | `centralwatch-tempo` | `3200` | High-throughput distributed tracing with TraceQL query engine |
-| **LocalStack** | `centralwatch-localstack` | `4566` | Offline cloud emulator for S3, DynamoDB, SNS, SQS, and Lambda |
+| **LocalStack** | `centralwatch-localstack` | `4566` | Offline cloud emulator for S3, DynamoDB, SNS, SQS, and containerized Lambda |
 | **OTel Collector** | `centralwatch-otel-collector` | `4317`/`4318`/`8889` | Unified OpenTelemetry telemetry ingestion pipeline and Prometheus exporter |
 
 ---
@@ -137,40 +138,53 @@ API-Monitoring-/
 
 ## 3. Production-Grade Features Implemented
 
-CentralWatch has been upgraded from a basic telemetry sample into an enterprise-grade platform across 6 major categories:
+CentralWatch has been upgraded from a basic telemetry sample into an enterprise-grade platform across 7 major categories:
 
 ### 1. Security Basics (Must-Haves)
 * **RBAC & Admin Route Protection:** All proxy credential management routes require authentication and admin privileges (`is_admin: true` / `role: "admin"`). Non-admin users are rejected with `403 Forbidden`.
 * **SSRF (Server-Side Request Forgery) Firewall:** Pre-flight DNS resolution blocks requests to loopback (`127.0.0.0/8`, `::1`), private RFC1918 networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local IPs (`169.254.0.0/16`, `fe80::/10`), and cloud metadata services (`169.254.169.254`).
 * **AWS KMS & Key Rotation:** Master secrets support AWS KMS envelope encryption with annual rotation and automated database re-encryption (`rotate_master_encryption_key`).
-* **Tamper-Evident Audit Logging:** Every administrative action (`SERVICE_CREATED`, `TOKEN_ROTATED`, `ROLE_MODIFIED`) is signed using HMAC-SHA256 and stored in `proxy_audit_logs`.
+* **Tamper-Evident Audit Logging:** Every administrative action (`SERVICE_CREATED`, `TOKEN_ROTATED`, `ROLE_MODIFIED`, `IP_UNBLOCKED`) is signed using HMAC-SHA256 and stored in `proxy_audit_logs`.
 * **Sliding Rate Limiter & Budget Quotas:** Token and service quotas prevent downstream API exhaustion, returning standard HTTP 429 with `Retry-After` headers.
 
-### 2. Alerting Pipeline
+### 2. Alerting & Tracing Pipeline
 * **Prometheus Alert Rules:** Pre-configured alerts for `HighErrorRate` (>5% 5xx for 2m), `HighLatencyP99` (>1000ms), `ServiceDown`, `ProxySecurityViolationsSpike`, and `SSRFBlockedAttempt`.
-* **Alertmanager Routing:** Automated deduplication, grouping, and webhook dispatching for critical alerts.
+* **Alertmanager Routing:** Automated deduplication, grouping, and notification routing for critical alerts.
 * **Log-to-Trace Deep Links in Grafana:** Loki datasource configured with `derivedFields` regex matching `"trace_id"`, allowing one-click navigation directly from log lines into Tempo trace waterfalls.
+* **Seamless Trace Inspection & Anonymous Admin Access:** Configured `GF_AUTH_ANONYMOUS_ORG_ROLE=Admin` so operators navigating to Explore or clicking trace IDs never hit login barriers or redirects to the homepage. Dual data links in `tracing.json` and `aws-services.json` open trace details in Tempo Explore or render in the embedded waterfall panel.
 
 ### 3. Proxy Upgrades (Star Feature)
+* **Cryptographic Random Tokens (`cw_role_<random>`):** High-entropy 24-byte URL-safe base64 strings generated via Python `secrets`, eliminating human-predictable identifiers.
+* **Dynamic Role Lookup & Zero-Trust RBAC:** Dynamic token resolution via SHA-256 digests (`get_role_by_token_hash`). Roles without permissions for a service (e.g. `non_chat_role`) return HTTP 403 with `outcome: blocked_role` in the audit log.
+* **Password-Protected Token Reveal:** Token secrets are masked in the UI; revealing them requires entering the operator password (`Password123!`), logged in the audit trail.
 * **Per-Service Budgets & Cost Tracking:** Automatic tracking of prompt and completion tokens for LLM providers (Gemini, Claude, OpenAI) with cost estimation per caller.
 * **Token Expiry & Schedules:** Proxy tokens enforce expiration (`token_expires_at`) with a single-click rotation endpoint.
 * **Secret Redaction:** Outbound logs and audit records automatically scrub sensitive headers (`Authorization`, `x-goog-api-key`, `api-key`, `cookie`).
 * **Resilience Mechanisms:** Sliding TTL response caching for idempotent GETs, exponential retries on upstream 5xx errors, and an in-memory circuit breaker that trips after 5 consecutive failures.
 * **Multi-Key Failover:** Configurable secondary upstream keys that automatically activate when an upstream provider returns HTTP 429 (quota exhausted).
 
-### 4. Reliability and Scale
-* **PostgreSQL State Persistence:** Replaced in-memory usage dictionaries with persistent tables (`proxy_services`, `proxy_roles`, `proxy_usage_history`, `proxy_audit_logs`) enabling horizontal multi-worker scaling.
+### 4. Quarantined & Blocked IP Management (Firewall Defense)
+* **Persistent Quarantine Storage:** PostgreSQL `proxy_quarantined_ips` table coupled with in-memory caching set (`_quarantined_ips`) in `PostgresProxyStore` for zero-latency enforcement before IP whitelist evaluation.
+* **Automated Threat Quarantine:** Brute-force credential stuffing (tested via `/simulate/brute-force`) triggers automated quarantine of attacker IPs (`198.51.100.42`), raises critical Alertmanager alerts (`IPBruteForceBlocked`), and blocks subsequent proxy requests with `HTTP 403` (`outcome: blocked_quarantine`).
+* **Admin Management Console:** Real-time **Quarantined & Blocked IPs** management card on `http://localhost:8080/#proxy` showing attacker IP, reason, timestamp, attempts, and an instant one-click **Unblock IP** action.
+
+### 5. Reliability, Cloud Services & Scale
+* **PostgreSQL State Persistence:** Replaced in-memory usage dictionaries with persistent tables (`proxy_services`, `proxy_roles`, `proxy_usage_history`, `proxy_audit_logs`, `proxy_quarantined_ips`) enabling horizontal multi-worker scaling.
+* **Linux Host Docker Socket & AWS Lambda Runtime:** Configured `DOCKER_SOCK_PATH=/var/run/docker.sock` in `.env` and `docker-compose.yml`, mounting the host Docker daemon into LocalStack to enable the containerized AWS Lambda runtime (`centralwatch-image-processor`) for asynchronous **S3 ➔ Lambda ➔ SNS** image processing.
+* **Managed Autonomous Traffic Generator:** Continuous background workload generator integrated into `docker-compose.yml` (`traffic-generator` service), startable and stoppable on demand (`docker compose stop/start traffic-generator` or `make traffic`).
 * **Async Boto3 Operations:** Wrapped DynamoDB calls in `asyncio.to_thread` across auth and orders routes to eliminate event loop blocking.
 * **Database Migrations:** Schema migrations managed via versioned SQL scripts in `migrations/`.
 * **Kubernetes Manifests & Retention Policies:** Production Kubernetes manifests in `deploy/k8s/` and enforced 7-day Loki / 48-hour Tempo retention limits.
 
-### 5. Security Depth (CSPM / SIEM)
+### 6. Security Depth (CSPM / SIEM)
 * **CloudTrail Multi-Region Ingestion:** Verifies active multi-region logging mapped to CIS AWS Benchmark 3.1.
 * **CIS Benchmark-Mapped CSPM Checks:** Evaluates IAM root account keys (CIS 1.4), S3 default encryption & public blocks (CIS 2.1.1, 2.1.5), unrestricted security groups (CIS 5.2), and KMS key rotation (CIS 3.8).
 * **SIEM Threat Correlation Engine:** Flags brute-force token harvesting and reconnaissance scans.
 * **Compliance Scoring & Trend History:** Computes real-time compliance scores (0–100%) stored with historical timestamp trends.
 
-### 6. Engineering Hygiene
+### 7. Engineering Hygiene & UI Continuity
+* **Dual-Portal Web UI:** Strict separation between the CentralWatch Platform Console (`:8080`) and the Client Demo Application (`:8090`).
+* **Session Token Continuity:** Eliminated token wiping on background polling in `updateGeminiStatus()`; relaxed token validation to accept all `cw_` prefixed tokens.
 * **CI/CD Automation:** GitHub Actions workflows (`.github/workflows/ci.yml` and `security-scan.yml`) with Python 3.12, linting, security tests, and container builds.
 * **Business-Route Tests:** Comprehensive test suite in `demo-app/tests/test_business_routes.py` covering auth, orders, files, and RBAC rejection.
 * **Developer SDK & OpenAPI Spec:** Standalone Python client SDK, bash cURL examples, and automated OpenAPI specification generator in `examples/`.

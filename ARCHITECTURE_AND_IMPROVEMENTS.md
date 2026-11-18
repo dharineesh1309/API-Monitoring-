@@ -286,3 +286,40 @@ Open `http://localhost:3000` (Grafana) and `http://localhost:9093` (Alertmanager
 4. **Inspect Alerting Engine:**
    - Visit `http://localhost:9090/alerts` in Prometheus to view the evaluation rules (`HighErrorRate`, `HighLatencyP99`, `ServiceDown`).
    - Visit `http://localhost:9093` in Alertmanager to inspect active alerts and suppression groups.
+
+---
+
+## Phase 5: Security Operations, Quarantined IPs & Zero-Trust RBAC
+
+### Feature 1: Quarantined & Blocked IP Management
+- **Architecture:** Persistent PostgreSQL table `proxy_quarantined_ips` coupled with zero-latency in-memory cache set (`_quarantined_ips`) in `PostgresProxyStore`.
+- **Automated Defense:** When an untrusted host executes repeated unauthorized attempts or brute-force credential stuffing (tested via `/simulate/brute-force`), the firewall immediately quarantines the attacker IP (e.g. `198.51.100.42`), raises a critical alert in Alertmanager (`IPBruteForceBlocked`), and blocks all subsequent proxy traffic from that IP with `HTTP 403` (`outcome: blocked_quarantine`).
+- **Administrative Control Panel:** The CentralWatch Platform UI (`http://localhost:8080/#proxy`) features a dedicated **Quarantined & Blocked IPs** management card displaying:
+  - Blocked IP address
+  - Reason & attack vector
+  - Detection timestamp & mechanism (`firewall_auto_defense`)
+  - Incident attempt count
+  - Instant one-click **Unblock IP** action with tamper-evident audit logging (`IP_UNBLOCKED`).
+
+### Feature 2: Cryptographically Secure Random Tokens & Dynamic RBAC
+- **Cryptographic Generation:** All machine-to-machine proxy access tokens are generated as high-entropy 24-byte URL-safe base64 strings (`cw_role_<random_token>`) using Python `secrets`, eliminating human-predictable identifiers.
+- **Dynamic Role Lookup by Token Hash:** The security engine resolves incoming tokens via constant-time SHA-256 digests across all provisioned roles (`get_role_by_token_hash`).
+- **Strict Role Boundaries (RBAC):** Roles enforce granular service and method permissions:
+  - `gemini_chat`: Permitted for `gemini_api` with `POST`.
+  - `proxy_reader`: Permitted for read-only inspection across all services (`GET`, `HEAD`, `OPTIONS`).
+  - `non_chat_role`: Restricted to non-AI services. When an authorized caller attempts to use this token for Gemini chat, CentralWatch enforces the boundary, rejects the request with `403 Forbidden`, and records `blocked_role` in the immutable audit trail.
+- **Password-Protected Token Reveal:** To comply with least-privilege security, token secrets are masked in the UI. Revealing any service or role token requires explicit administrator password verification (`Password123!`), logged in the audit trail.
+
+### Feature 3: Linux Host Docker Socket & AWS Lambda Runtime
+- **Problem Resolved:** LocalStack emulates AWS Lambda by spawning Docker execution containers. On Linux hosts, the default Docker Desktop path (`/run/host-services/docker.proxy.sock`) was nonexistent, leaving the Lambda function in a `State: Failed` condition.
+- **Solution:** Configured `DOCKER_SOCK_PATH=/var/run/docker.sock` in `.env` and `docker-compose.yml`, mounting the host Docker daemon socket into LocalStack.
+- **Workflow Verified:** End-to-end asynchronous **S3 ➔ Lambda ➔ SNS** image processing (`centralwatch-image-processor`) processes images, invokes the containerized runtime, and broadcasts completion events.
+
+### Feature 4: Seamless Grafana Trace Inspection & Anonymous Admin Access
+- **Frictionless Tracing:** Set `GF_AUTH_ANONYMOUS_ORG_ROLE=Admin` in `docker-compose.yml`. Anonymous viewers navigating to Grafana Explore or clicking trace links are never redirected to the login screen or homepage.
+- **Direct Trace Detail Links:** Configured dual data links on `traceID` columns in both `tracing.json` and `aws-services.json`:
+  1. **View Trace Details in Explore:** Opens Grafana's native Tempo trace viewer in a new tab, displaying the full span tree, durations, HTTP/AWS tags, and correlated Loki logs.
+  2. **Open Trace in Waterfall Panel:** Dynamically updates the embedded waterfall panel directly on the CentralWatch dashboard.
+
+### Feature 5: Managed Workload Traffic Generator
+- Reconnected and natively integrated `traffic-generator` into `docker-compose.yml` (`centralwatch-traffic-gen`), enabling autonomous workload simulation that can be started, stopped, or inspected via `docker compose stop/start traffic-generator` or `make traffic`.
