@@ -308,7 +308,7 @@ Open `http://localhost:3000` (Grafana) and `http://localhost:9093` (Alertmanager
   - `gemini_chat`: Permitted for `gemini_api` with `POST`.
   - `proxy_reader`: Permitted for read-only inspection across all services (`GET`, `HEAD`, `OPTIONS`).
   - `non_chat_role`: Restricted to non-AI services. When an authorized caller attempts to use this token for Gemini chat, CentralWatch enforces the boundary, rejects the request with `403 Forbidden`, and records `blocked_role` in the immutable audit trail.
-- **Password-Protected Token Reveal:** To comply with least-privilege security, token secrets are masked in the UI. Revealing any service or role token requires explicit administrator password verification (`Password123!`), logged in the audit trail.
+- **Password-Protected Token Reveal:** To comply with least-privilege security, token secrets are masked in the UI. Revealing any service or role token requires a signed-in administrator to re-enter their own password (or `ADMIN_PASSWORD`, if set; there is no built-in default), logged in the audit trail.
 
 ### Feature 3: Linux Host Docker Socket & AWS Lambda Runtime
 - **Problem Resolved:** LocalStack emulates AWS Lambda by spawning Docker execution containers. On Linux hosts, the default Docker Desktop path (`/run/host-services/docker.proxy.sock`) was nonexistent, leaving the Lambda function in a `State: Failed` condition.

@@ -112,7 +112,7 @@ services:
       # OWASP ASTF security scanner (paths live inside the demo-app image).
       - ASTF_SCRIPT_PATH=/scripts/security_scan.sh
       - ASTF_REPORT_PATH=/app/reports/security-report.html
-      - ASTF_SCAN_TIMEOUT_SECONDS=1800
+      - ASTF_SCAN_TIMEOUT_SECONDS=900
       # AWS APIs (name patterns) the deep test may send attack traffic to. Only list APIs you may test.
       - API_SCAN_ALLOWLIST=${API_SCAN_ALLOWLIST:-cw-lab-*}
     healthcheck:

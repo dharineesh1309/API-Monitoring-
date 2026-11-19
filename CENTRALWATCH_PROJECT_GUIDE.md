@@ -372,14 +372,21 @@ Direct backend URLs start with `http://127.0.0.1:8000`. Through the unified dash
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/centralwatch/proxy/keys` | No in demo | List services with masked keys |
-| POST | `/centralwatch/proxy/keys` | No in demo | Add or replace a proxy registration |
-| GET/POST | `/centralwatch/proxy/roles` | No in demo | List or create service/method access roles |
-| POST | `/centralwatch/proxy/keys/{service}/rotate-token` | No in demo | Rotate a service's proxy token and invalidate the old token |
-| GET | `/centralwatch/proxy/history` | No in demo | Return recent sanitized API usage history |
-| GET | `/centralwatch/proxy/metrics` | No in demo | Return aggregate proxy traffic metrics |
+| GET | `/centralwatch/proxy/health` | No | Whether the proxy and its database answer (shows no configuration) |
+| GET | `/centralwatch/proxy/keys` | Admin | List services with masked keys |
+| POST | `/centralwatch/proxy/keys` | Admin | Add or replace a proxy registration |
+| GET/POST | `/centralwatch/proxy/roles` | Admin | List or create service/method access roles |
+| POST | `/centralwatch/proxy/keys/{service}/rotate-token` | Admin | Rotate a service's proxy token and invalidate the old token |
+| POST | `/centralwatch/proxy/{keys/{service}\|roles/{role}}/reveal-token` | Admin + their own password | Show a stored proxy token (audited) |
+| GET | `/centralwatch/proxy/history` | Admin | Return recent sanitized API usage history |
+| GET | `/centralwatch/proxy/metrics` | Admin | Return aggregate proxy traffic metrics |
+| GET | `/centralwatch/proxy/quarantine` | Admin | List quarantined IP addresses |
+| POST | `/centralwatch/proxy/quarantine/unblock` | Admin | Release a quarantined IP address (audited) |
+| GET | `/centralwatch/proxy/audit-logs` | Admin | Return the signed audit log |
 | Multiple | `/centralwatch/proxy/{service}/{path}` | IP allowlist + proxy token + role | Forward request with injected upstream credential |
-| POST | `/centralwatch/security-scan?target_url=...` | Yes | Run OWASP ASTF synchronously |
+| POST | `/centralwatch/security-scan?target_url=...` | Yes | Run OWASP ASTF (one at a time, at most 10 minutes) |
+| GET | `/centralwatch/security-scan/status` | Yes | Progress of the running scan |
+| POST | `/centralwatch/security-scan/stop` | Yes | Stop the running scan |
 | GET | `/centralwatch/security-scan/report` | Yes | Return latest report inline |
 
 ### 10.8 AWS minimum-security agent

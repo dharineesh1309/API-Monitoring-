@@ -122,7 +122,7 @@ def simulate_retry(container: Container = Depends(get_container)):
 async def simulate_brute_force(request: Request, container: Container = Depends(get_container)):
     attacker_ip = "198.51.100.42"
     port = request.app.state.settings.port
-    proxy_url = f"http://127.0.0.1:{port}/centralwatch/proxy/gemini_api/models/gemini-2.5-flash:generateContent"
+    proxy_url = f"http://127.0.0.1:{port}/centralwatch/proxy/gemini_api/models/gemini-3.1-flash-lite:generateContent"
     # Execute 5 rapid unauthorized requests from untrusted IP to trigger brute-force block
     for _ in range(5):
         try:

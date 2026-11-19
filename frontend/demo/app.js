@@ -712,6 +712,11 @@ async function loadGeminiStatus() {
     updateGeminiStatus();
   } catch (error) {
     const keyStatus = $("#gemini-key-status");
+    if (error.status === 401 || error.status === 403) {  // the key registry is for administrators; chatting still works
+      if (keyStatus) keyStatus.textContent = "Managed by your administrator";
+      setMessage($("#gemini-config-message"), "");
+      return;
+    }
     if (keyStatus) keyStatus.textContent = "Registry unavailable";
     setMessage($("#gemini-config-message"), error.message, true);
   }

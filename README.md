@@ -156,7 +156,7 @@ CentralWatch has been upgraded from a basic telemetry sample into an enterprise-
 ### 3. Proxy Upgrades (Star Feature)
 * **Cryptographic Random Tokens (`cw_role_<random>`):** High-entropy 24-byte URL-safe base64 strings generated via Python `secrets`, eliminating human-predictable identifiers.
 * **Dynamic Role Lookup & Zero-Trust RBAC:** Dynamic token resolution via SHA-256 digests (`get_role_by_token_hash`). Roles without permissions for a service (e.g. `non_chat_role`) return HTTP 403 with `outcome: blocked_role` in the audit log.
-* **Password-Protected Token Reveal:** Token secrets are masked in the UI; revealing them requires entering the operator password (`Password123!`), logged in the audit trail.
+* **Password-Protected Token Reveal:** Token secrets are masked in the UI; revealing them requires a signed-in administrator to re-enter their own password (or `ADMIN_PASSWORD`, if set; there is no built-in default), and every reveal is logged in the audit trail.
 * **Per-Service Budgets & Cost Tracking:** Automatic tracking of prompt and completion tokens for LLM providers (Gemini, Claude, OpenAI) with cost estimation per caller, displayed in real-time across the Platform Console (`:8080/#proxy`) metrics grid, traffic breakdown, and API usage tables.
 * **Token Expiry & Schedules:** Proxy tokens enforce expiration (`token_expires_at`) with a single-click rotation endpoint.
 * **Secret Redaction:** Outbound logs and audit records automatically scrub sensitive headers (`Authorization`, `x-goog-api-key`, `api-key`, `cookie`).

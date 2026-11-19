@@ -12,6 +12,9 @@ REPORT_DIR="/app/reports"
 # Optional report path override (the router passes ASTF_REPORT_PATH so the
 # report the API validates is always the one ASTF actually wrote).
 REPORT_PATH="${3:-$REPORT_DIR/security-report.html}"
+# Same limits as the deep test: ASTF stops itself after this many minutes, and two threads keep the load on the target low.
+ASTF_MINUTES="${ASTF_SCAN_MINUTES:-10}"
+ASTF_THREADS="${ASTF_SCAN_THREADS:-2}"
 mkdir -p "$REPORT_DIR"
 
 if [ ! -f "$ASTF_JAR" ]; then
@@ -30,12 +33,12 @@ echo "Running ASTF security scan against $TARGET_URL..."
 
 if [ -n "$TOKEN" ]; then
     set +e
-    java -jar "$ASTF_JAR" -u "$TARGET_URL" --token "$TOKEN" -f HTML -o "$REPORT_PATH"
+    java -jar "$ASTF_JAR" -u "$TARGET_URL" --token "$TOKEN" -t "$ASTF_THREADS" --timeout "$ASTF_MINUTES" -f HTML -o "$REPORT_PATH"
     astf_exit=$?
     set -e
 else
     set +e
-    java -jar "$ASTF_JAR" -u "$TARGET_URL" -f HTML -o "$REPORT_PATH"
+    java -jar "$ASTF_JAR" -u "$TARGET_URL" -t "$ASTF_THREADS" --timeout "$ASTF_MINUTES" -f HTML -o "$REPORT_PATH"
     astf_exit=$?
     set -e
 fi

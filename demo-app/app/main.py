@@ -390,6 +390,7 @@ def create_app() -> FastAPI:
             script_path=settings.astf_script_path,
             report_path=settings.astf_report_path,
             scan_timeout_seconds=settings.astf_scan_timeout_seconds,
+            self_hosts={"demo-app", "centralwatch-demo-app"},  # Docker names of this app; other targets get no token
         ),
         prefix="/centralwatch",
     )

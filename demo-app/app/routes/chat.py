@@ -14,7 +14,7 @@ class ChatPrompt(BaseModel):
     """One text-generation request from the demo dashboard."""
 
     prompt: str = Field(min_length=1, max_length=8000)
-    model: str = Field(default="gemini-2.5-flash", min_length=1, max_length=100)
+    model: str = Field(default="gemini-3.1-flash-lite", min_length=1, max_length=100)  # gemini-2.5-flash was retired
 
     @field_validator("prompt")
     @classmethod

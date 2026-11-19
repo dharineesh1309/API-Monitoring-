@@ -269,6 +269,19 @@ input[type="file"] { height: auto; min-height: 36px; padding: 6px; }
 .progress-state div { display: grid; }
 .progress-state strong { font-size: 11px; }
 .progress-state span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+@media (min-width: 681px) {
+  #security-scan-form:has(#stop-security-scan:not([hidden])) { grid-template-columns: minmax(220px, 1fr) auto auto; }
+}
+.scan-progress { align-items: flex-start; }
+.scan-progress > i { margin-top: 1px; flex: none; }
+.progress-state .scan-progress-body { flex: 1; min-width: 0; }
+.progress-state .scan-bar { display: block; height: 6px; margin: 8px 0 6px; overflow: hidden; border-radius: 999px; background: var(--border); }
+.progress-state .scan-bar span { display: block; width: 0; height: 100%; margin: 0; border-radius: inherit; background: var(--accent); transition: width .6s ease; }
+.progress-state .scan-bar.indeterminate span { width: 30%; animation: scan-slide 1.3s ease-in-out infinite; }
+.progress-state .scan-progress-test { font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
+.progress-state .scan-progress-test:empty { display: none; }
+@keyframes scan-slide { from { transform: translateX(-110%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .progress-state .scan-bar.indeterminate span { width: 100%; opacity: .35; animation: none; } }
 .result-title { display: block; margin-bottom: 14px; font-size: 13px; }
 .detail-list { display: grid; gap: 0; margin: 0 0 16px; }
 .detail-list div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }

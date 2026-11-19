@@ -109,7 +109,7 @@ class Settings(BaseSettings):
     # --- OWASP ASTF security scanner ------------------------------------------
     astf_script_path: str = "/scripts/security_scan.sh"
     astf_report_path: str = "/app/reports/security-report.html"
-    astf_scan_timeout_seconds: int = 1800
+    astf_scan_timeout_seconds: int = 900  # backstop; ASTF itself stops after 10 minutes
     # Comma-separated name patterns of AWS APIs the deep test may send attack traffic to.
     api_scan_allowlist: str = "cw-lab-*"
     # How often to rescan and probe every exposed API: settings, health, leaks (real AWS only; 0 turns it off).

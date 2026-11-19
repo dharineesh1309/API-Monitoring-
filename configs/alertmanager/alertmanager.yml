@@ -13,13 +13,9 @@ route:
       receiver: 'security-critical'
       continue: true
 
+# No outgoing notifications yet: alerts are shown on the CentralWatch Alerts page, which reads them from
+# Alertmanager. (The old placeholder webhooks POSTed to the app's /healthz every 15 s, which rejects POST,
+# so each alert added 405 errors to the dashboards.) To notify people, add email_configs or slack_configs here.
 receivers:
   - name: 'default'
-    webhook_configs:
-      - url: 'http://demo-app:8000/healthz'
-        send_resolved: true
-
   - name: 'security-critical'
-    webhook_configs:
-      - url: 'http://demo-app:8000/healthz'
-        send_resolved: true

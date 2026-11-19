@@ -17,10 +17,11 @@ import logging
 import math
 import os
 import re
+import asyncio
 import secrets
+import signal
 import socket
 import struct
-import subprocess
 from asyncio import to_thread
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -436,6 +437,22 @@ _PROXY_HTTP_LIMITS = httpx.Limits(
 )
 
 
+async def _restore_usage_history(store) -> None:
+    """Reload the latest proxied calls from the database, so history and metrics survive a restart."""
+    if not hasattr(store, "list_usage_history"):
+        return
+    try:
+        rows = await store.list_usage_history(limit=_PROXY_HISTORY_LIMIT)  # newest first
+    except Exception as exc:  # noqa: BLE001 - history is a convenience; the proxy must start without it
+        logger.warning("Could not reload proxy usage history: %s", exc)
+        return
+    with _proxy_state_lock:
+        known = {item["request_id"] for item in PROXY_USAGE_HISTORY}
+        PROXY_USAGE_HISTORY[:0] = [row for row in reversed(rows) if row["request_id"] not in known]
+        del PROXY_USAGE_HISTORY[: max(0, len(PROXY_USAGE_HISTORY) - _PROXY_HISTORY_LIMIT)]
+    logger.info("Reloaded %d proxy usage records", len(rows))
+
+
 @asynccontextmanager
 async def _proxy_lifespan(app):
     """Start the proxy database and its shared upstream connection pool."""
@@ -450,6 +467,7 @@ async def _proxy_lifespan(app):
     try:
         await store.start(_DEFAULT_EXTERNAL_SERVICES, _DEFAULT_PROXY_ROLES)
         logger.info("CentralWatch proxy configuration store is ready")
+        await _restore_usage_history(store)
         if owns_http_client:
             http_client = httpx.AsyncClient(
                 follow_redirects=False,
@@ -651,31 +669,37 @@ def _require_admin(request: Request, authorization: str = Header(default="")) ->
     return {"user_id": "usr_admin", "email": "admin@centralwatch.local", "is_admin": True}
 
 
-def _verify_admin_password(request: Request, password: str, current_user_email: str | None = None) -> bool:
+def _verify_admin_password(request: Request, password: str, admin_email: str | None) -> bool:
+    """The signed-in administrator re-enters their own password. ADMIN_PASSWORD also works, but only when it is set:
+    there is no built-in default, so a password printed in the docs can never unlock tokens."""
     if not password:
         return False
     container = getattr(request.app.state, "container", None)
     auth = getattr(container, "auth", None) if container else None
-    if auth is not None:
-        candidates = [current_user_email, "operator@example.com"]
-        for email in candidates:
-            if not email:
-                continue
-            try:
-                auth.login(email, password)
-                return True
-            except Exception:
-                pass
-    dev_password = os.environ.get("ADMIN_PASSWORD", "Password123!")
-    return hmac.compare_digest(password.strip(), dev_password.strip())
+    if auth is not None and admin_email:
+        try:
+            auth.login(admin_email, password)
+            return True
+        except Exception:
+            pass
+    configured = os.environ.get("ADMIN_PASSWORD", "")
+    return bool(configured) and hmac.compare_digest(password.strip().encode(), configured.strip().encode())
 
 
 # ---------------------------------------------------------------------------
 # Proxy Management Endpoints
 # ---------------------------------------------------------------------------
+@proxy_router.get("/health")
+async def proxy_health(request: Request):
+    """Whether the proxy and its database answer. Open to everyone because it shows no configuration."""
+    await _database_call(_proxy_store(request).ping(), "ping proxy store")
+    return {"status": "ok"}
+
+
 @proxy_router.get("/keys")
-async def list_keys(request: Request):
-    """List managed services without exposing their secret API keys."""
+async def list_keys(request: Request, authorization: str = Header(default="")):
+    """List managed services without exposing their secret API keys (administrators only)."""
+    _require_admin(request, authorization)
     services = await _database_call(_proxy_store(request).list_services(), "list services")
     return [
         {
@@ -831,8 +855,9 @@ async def rotate_master_encryption_key(
 
 
 @proxy_router.get("/roles")
-async def list_proxy_roles(request: Request):
-    """List role definitions used for machine-to-machine proxy access."""
+async def list_proxy_roles(request: Request, authorization: str = Header(default="")):
+    """List role definitions used for machine-to-machine proxy access (administrators only)."""
+    _require_admin(request, authorization)
     store = _proxy_store(request)
     roles = await _database_call(store.list_roles(), "list roles")
     services = await _database_call(store.list_services(), "list services for roles")
@@ -920,23 +945,11 @@ async def reveal_role_token(
     request: Request,
     authorization: str = Header(default=""),
 ):
-    """Verify administrator password and return the role's proxy token."""
-    if not _verify_admin_password(request, body.password):
+    """Return the role's proxy token to a signed-in administrator who re-enters their password."""
+    admin_user = _require_admin(request, authorization)
+    if not _verify_admin_password(request, body.password, admin_user.get("email")):
         raise HTTPException(status_code=401, detail="Invalid administrator password.")
-
-    actor_id = "usr_admin_operator"
-    actor_email = "operator@example.com"
-    token = authorization.removeprefix("Bearer ").strip()
-    if token:
-        container = getattr(request.app.state, "container", None)
-        auth = getattr(container, "auth", None) if container else None
-        if auth:
-            try:
-                user = auth.get_profile(token)
-                actor_id = user.user_id
-                actor_email = user.email
-            except Exception:
-                pass
+    actor_id, actor_email = admin_user["user_id"], admin_user.get("email")
 
     store = _proxy_store(request)
     role = await _database_call(store.get_role(role_name), "get role")
@@ -982,8 +995,9 @@ async def reveal_service_token(
     request: Request,
     authorization: str = Header(default=""),
 ):
-    """Verify administrator password and return the service's proxy token."""
-    if not _verify_admin_password(request, body.password):
+    """Return the service's proxy token to a signed-in administrator who re-enters their password."""
+    admin_user = _require_admin(request, authorization)
+    if not _verify_admin_password(request, body.password, admin_user.get("email")):
         raise HTTPException(status_code=401, detail="Invalid administrator password.")
 
     store = _proxy_store(request)
@@ -1006,6 +1020,15 @@ async def reveal_service_token(
         service["token_hint"] = f"...{access_token[-6:]}"
         await _database_call(store.upsert_service(service), "provision service token")
 
+    await store.record_audit_log(
+        action="SERVICE_TOKEN_REVEALED",
+        actor_id=admin_user["user_id"],
+        actor_email=admin_user.get("email"),
+        client_ip=_client_ip(request),
+        service_name=service_name,
+        details={},
+    )
+
     return {
         "status": "success",
         "service_name": service_name,
@@ -1019,8 +1042,9 @@ class UnblockIpRequest(BaseModel):
 
 
 @proxy_router.get("/quarantine")
-async def list_quarantined_ips(request: Request):
-    """Return list of all quarantined/blocked IP addresses."""
+async def list_quarantined_ips(request: Request, authorization: str = Header(default="")):
+    """Return list of all quarantined/blocked IP addresses (administrators only)."""
+    _require_admin(request, authorization)
     store = _proxy_store(request)
     return await store.list_quarantined_ips()
 
@@ -1029,16 +1053,18 @@ async def list_quarantined_ips(request: Request):
 async def unblock_quarantined_ip(
     body: UnblockIpRequest,
     request: Request,
+    authorization: str = Header(default=""),
 ):
-    """Unblock a quarantined IP address."""
+    """Unblock a quarantined IP address (administrators only, so a blocked caller cannot unblock itself)."""
+    admin_user = _require_admin(request, authorization)
     store = _proxy_store(request)
     success = await store.unblock_ip(body.ip_address)
     if not success:
         raise HTTPException(status_code=404, detail=f"IP address {body.ip_address} was not quarantined.")
     await store.record_audit_log(
         action="IP_UNBLOCKED",
-        actor_id="admin",
-        actor_email="admin@centralwatch.internal",
+        actor_id=admin_user["user_id"],
+        actor_email=admin_user.get("email"),
         client_ip=_client_ip(request),
         service_name=None,
         details={"ip_address": body.ip_address},
@@ -1050,19 +1076,24 @@ async def unblock_quarantined_ip(
 async def proxy_audit_logs(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
+    authorization: str = Header(default=""),
 ):
-    """Return cryptographic tamper-evident audit logs."""
+    """Return cryptographic tamper-evident audit logs (administrators only)."""
+    _require_admin(request, authorization)
     store = _proxy_store(request)
     return await store.list_audit_logs(limit)
 
 
 @proxy_router.get("/history")
 async def proxy_usage_history(
+    request: Request,
     limit: int = Query(default=100, ge=1, le=500),
     service_name: str | None = None,
     outcome: str | None = None,
+    authorization: str = Header(default=""),
 ):
-    """Return recent proxy requests without bodies, secrets, or query values."""
+    """Return recent proxy requests without bodies, secrets, or query values (administrators only)."""
+    _require_admin(request, authorization)
     with _proxy_state_lock:
         records = list(reversed(PROXY_USAGE_HISTORY))
     if service_name:
@@ -1073,8 +1104,9 @@ async def proxy_usage_history(
 
 
 @proxy_router.get("/metrics")
-async def proxy_usage_metrics(request: Request):
-    """Aggregate proxy request history and cost tracking for the control plane."""
+async def proxy_usage_metrics(request: Request, authorization: str = Header(default="")):
+    """Aggregate proxy request history and cost tracking for the control plane (administrators only)."""
+    _require_admin(request, authorization)
     with _proxy_state_lock:
         records = list(PROXY_USAGE_HISTORY)
 
@@ -1487,18 +1519,125 @@ async def _require_user(authorization: str, get_token_user: Optional[Callable[[s
     return token
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _kill_process_group(pid: int) -> None:
+    """Kill the scan script and everything it started (ASTF's java process), not just the script."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(pid, signal.SIGKILL)  # the script runs in its own session, so its group id is its pid
+        else:  # Windows (tests only): no process groups
+            os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+async def _client_gone(request: Request) -> None:
+    """Return once the client disconnects.
+
+    Reads the ASGI receive channel directly: ``request.is_disconnected()`` never sees the disconnect
+    behind a ``BaseHTTPMiddleware`` (the app's SecurityEnforcementMiddleware is one). The scan request
+    has no body, so the channel carries nothing but the disconnect.
+    """
+    try:
+        while (await request.receive())["type"] != "http.disconnect":
+            pass
+    except Exception:  # noqa: BLE001 - if the channel cannot be read, never report a disconnect
+        await asyncio.Event().wait()
+
+
+async def _run_scan(cmd: list[str], timeout: float, request: Request, log: Any, stop: asyncio.Event) -> int:
+    """Run the scan script, writing its output to ``log``; stop it when it runs past ``timeout``,
+    ``stop`` is set (the Stop button), the caller goes away, or the request is cancelled."""
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=log, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+    waiter = asyncio.ensure_future(proc.wait())
+    gone = asyncio.ensure_future(_client_gone(request))
+    stopped = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({waiter, gone, stopped}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+        if waiter.done():
+            return waiter.result()
+        if stopped.done():
+            logger.info("Security scan stopped by the user")
+            raise HTTPException(status_code=499, detail="The scan was stopped.")
+        if gone.done():
+            logger.warning("Security scan stopped: the browser closed the request")
+            raise HTTPException(status_code=499, detail="The request was closed, so the scan was stopped.")
+        raise HTTPException(status_code=504, detail=f"Security scan stopped after {int(timeout)} seconds.")
+    finally:
+        gone.cancel()
+        stopped.cancel()
+        if not waiter.done():
+            _kill_process_group(proc.pid)
+            await asyncio.wait({waiter}, timeout=5.0)
+
+
+# Lines ASTF prints while it runs, e.g. "Scan progress: 5.2% (10/192 tasks completed)".
+_ASTF_PROGRESS = re.compile(r"Scan progress: ([\d.]+)% \((\d+)/(\d+) tasks completed\)")
+_ASTF_PLAN = re.compile(r"Running (\d+) test cases against (\d+) endpoints")
+_ASTF_TEST = re.compile(r"Executing (ASTF-[\w-]+) test on (\S+ \S+)")
+_ASTF_DONE = re.compile(r"Scan completed\. Found (\d+) issues")
+
+
+def _scan_progress(log_text: str) -> dict[str, Any]:
+    """Phase, share of test tasks done and the test running now, from what ASTF has printed so far."""
+    progress = _ASTF_PROGRESS.findall(log_text)
+    plan = _ASTF_PLAN.search(log_text)
+    tests = _ASTF_TEST.findall(log_text)
+    done = _ASTF_DONE.search(log_text)
+    if done:
+        phase = "Writing the report"
+    elif progress or plan:
+        phase = "Testing endpoints"
+    elif "endpoint discovery" in log_text:
+        phase = "Discovering endpoints"
+    elif "Downloading OWASP ASTF" in log_text:
+        phase = "Downloading the scanner"
+    else:
+        phase = "Starting the scanner"
+    total = int(progress[-1][2]) if progress else (int(plan.group(1)) * int(plan.group(2)) if plan else None)
+    return {
+        "phase": phase,
+        "percent": 100.0 if done else (float(progress[-1][0]) if progress else 0.0),
+        "tasks_done": total if done else (int(progress[-1][1]) if progress else 0),
+        "tasks_total": total,
+        "endpoints": int(plan.group(2)) if plan else None,
+        "current_test": f"{tests[-1][0]} on {tests[-1][1]}" if tests and not done else None,
+        "issues_found": int(done.group(1)) if done else None,
+    }
+
+
+def _read_log(path: str) -> str:
+    """The start and the end of the scan log (the plan is printed early, progress at the end)."""
+    try:
+        with open(path, "rb") as log:
+            head = log.read(131072)
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - 65536))
+            return (head + b"\n" + log.read()).decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
 def create_security_router(
     get_token_user: Optional[Callable[[str], Optional[Any]]] = None,
     script_path: Optional[str] = None,
     report_path: Optional[str] = None,
     scan_timeout_seconds: Optional[int] = None,
+    self_hosts: Optional[set[str]] = None,
 ) -> APIRouter:
     """Build the OWASP ASTF security scanner router.
 
     ``get_token_user(token)`` must return the user for a valid bearer token (or None / raise).
     Both routes require it: the scan launches attack traffic, and the report lists vulnerabilities.
+    ``self_hosts`` are extra host names of this application (e.g. its Docker service name). The caller's
+    token is passed to ASTF only when the target is this application; any other target gets no token.
     """
     router = APIRouter(tags=["Security"])
+    own_hosts = _LOOPBACK_HOSTS | {socket.gethostname().lower()} | {h.lower() for h in (self_hosts or ())}
+    scan_lock = asyncio.Lock()  # one scan at a time: they share one report file
+    current: dict[str, Any] = {}  # the running scan: target, started, log, stop
 
     @router.post("/security-scan")
     async def trigger_security_scan(
@@ -1513,25 +1652,28 @@ def create_security_router(
             raise HTTPException(status_code=500, detail="Security scan script not configured on the server.")
 
         resolved_report = report_path or os.environ.get("ASTF_REPORT_PATH", "/app/reports/security-report.html")
-        timeout = scan_timeout_seconds if scan_timeout_seconds is not None else int(os.environ.get("ASTF_SCAN_TIMEOUT_SECONDS", "1800"))
+        timeout = scan_timeout_seconds if scan_timeout_seconds is not None else int(os.environ.get("ASTF_SCAN_TIMEOUT_SECONDS", "900"))
+        scan_token = token if (urlsplit(target_url).hostname or "").lower() in own_hosts else ""
 
-        logger.info("Security scan started: target_url=%s script=%s", target_url, resolved_script)
-        try:
-            result = await to_thread(
-                subprocess.run,
-                [resolved_script, target_url, token, resolved_report],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="Security scan timed out.") from None
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to execute security scan: {exc}") from exc
-        if result.returncode not in (0, 1):  # ASTF: 0 = clean, 1 = findings, anything else = the scan failed
-            logger.error("Security scan failed: target_url=%s exit_code=%d", target_url, result.returncode)
-            raise HTTPException(status_code=502, detail=f"ASTF security scan failed with exit code {result.returncode}.")
+        if scan_lock.locked():
+            raise HTTPException(status_code=409, detail="A security scan is already running. Wait for it to finish, then try again.")
+        async with scan_lock:
+            logger.info("Security scan started: target_url=%s script=%s with_token=%s", target_url, resolved_script, bool(scan_token))
+            log_path = f"{resolved_report}.log"
+            current.update(target=target_url, started=time(), log=log_path, stop=asyncio.Event(), limit=timeout)
+            try:
+                os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
+                with open(log_path, "wb") as log:
+                    returncode = await _run_scan(
+                        [resolved_script, target_url, scan_token, resolved_report], timeout, request, log, current["stop"],
+                    )
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Failed to execute security scan: {exc}") from exc
+            finally:
+                current.clear()
+        if returncode not in (0, 1):  # ASTF: 0 = clean, 1 = findings, anything else = the scan failed
+            logger.error("Security scan failed: target_url=%s exit_code=%d", target_url, returncode)
+            raise HTTPException(status_code=502, detail=f"ASTF security scan failed with exit code {returncode}.")
 
         try:
             report_size = os.path.getsize(resolved_report)
@@ -1545,8 +1687,32 @@ def create_security_router(
             "target": target_url,
             "report": resolved_report,
             "report_bytes": report_size,
-            "findings_detected": result.returncode == 1,
+            "findings_detected": returncode == 1,
         }
+
+    @router.get("/security-scan/status")
+    async def security_scan_status(authorization: str = Header(default="")) -> dict:
+        """Progress of the running scan, read from ASTF's own progress lines."""
+        await _require_user(authorization, get_token_user)
+        if not current:
+            return {"running": False}
+        astf_limit = int(os.environ.get("ASTF_SCAN_MINUTES", "10")) * 60  # the script passes the same value to ASTF
+        return {
+            "running": True,
+            "target": current["target"],
+            "elapsed_seconds": int(time() - current["started"]),
+            "limit_seconds": min(astf_limit, int(current["limit"])),
+            **_scan_progress(_read_log(current["log"])),
+        }
+
+    @router.post("/security-scan/stop")
+    async def stop_security_scan(authorization: str = Header(default="")) -> dict:
+        """Stop the running scan; the request that started it then answers 499."""
+        await _require_user(authorization, get_token_user)
+        if not current:
+            raise HTTPException(status_code=409, detail="No security scan is running.")
+        current["stop"].set()
+        return {"status": "Stopping", "target": current["target"]}
 
     @router.get("/security-scan/report")
     async def get_security_report(authorization: str = Header(default="")):

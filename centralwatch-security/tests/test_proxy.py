@@ -3,6 +3,7 @@
 import base64
 import socket
 from copy import deepcopy
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -555,3 +556,127 @@ def test_proxy_history_and_metrics_capture_success_and_blocks(client, monkeypatc
     assert metrics["successful_requests"] == 1
     assert metrics["authenticated_proxy_tokens"] == 1
     assert metrics["by_status"] == {"201": 1, "404": 1}
+
+
+def _usage(request_id, minute):
+    return {
+        "request_id": request_id, "timestamp": f"2026-11-19T08:{minute:02d}:00+00:00", "service_name": "gemini_api",
+        "method": "POST", "path": "/models/x:generateContent", "client_ip": "127.0.0.1", "token_hint": "...abc123",
+        "role_name": "gemini_chat", "status_code": 200, "outcome": "success", "duration_ms": 10.0,
+        "bytes_in": 10, "bytes_out": 20, "tokens_used": 50, "estimated_cost_usd": 0.0000175,
+    }
+
+
+def test_usage_history_and_metrics_survive_a_restart(monkeypatch):
+    """The database keeps every call; a fresh process must show them again, not an empty page."""
+    PROXY_USAGE_HISTORY.clear()  # a new process starts with nothing in memory
+
+    class StoreWithHistory(InMemoryProxyStore):
+        async def list_usage_history(self, limit=100, service_name=None, outcome=None):
+            return [_usage("proxy_newer", 58), _usage("proxy_older", 57)][:limit]  # newest first, like the database
+
+    app = FastAPI()
+    app.state.centralwatch_proxy_store = StoreWithHistory()
+    app.include_router(proxy_router, prefix="/centralwatch")
+    with TestClient(app) as client:
+        history = client.get("/centralwatch/proxy/history").json()
+        metrics = client.get("/centralwatch/proxy/metrics").json()
+
+    assert [item["request_id"] for item in history] == ["proxy_newer", "proxy_older"]
+    assert metrics["total_requests"] == 2
+    assert metrics["total_tokens_tracked"] == 100
+
+
+class FakeHostAuth:
+    """The host application's auth: one administrator and one ordinary user."""
+
+    users = {
+        "admin-token": SimpleNamespace(user_id="usr_admin1", email="admin@example.com", is_admin=True, status="ACTIVE", role="admin"),
+        "user-token": SimpleNamespace(user_id="usr_user1", email="user@example.com", is_admin=False, status="ACTIVE", role="user"),
+    }
+
+    def get_profile(self, token):
+        if token not in self.users:
+            raise ValueError("unknown token")
+        return self.users[token]
+
+    def login(self, email, password):
+        if (email, password) != ("admin@example.com", "right-password"):
+            raise ValueError("wrong email or password")
+        return "admin-token"
+
+
+@pytest.fixture
+def secured_client(proxy_store, monkeypatch):
+    monkeypatch.setattr(routers, "_client_ip", lambda _request: "127.0.0.1")
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    app = FastAPI()
+    app.state.centralwatch_proxy_store = proxy_store
+    app.state.container = SimpleNamespace(auth=FakeHostAuth())
+    app.include_router(proxy_router, prefix="/centralwatch")
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.mark.parametrize("path", ["/centralwatch/proxy/roles/proxy_reader/reveal-token", "/centralwatch/proxy/keys/mock_service/reveal-token"])
+def test_reveal_needs_a_signed_in_admin_and_their_own_password(secured_client, proxy_store, monkeypatch, path):
+    def reveal(token, password):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        return secured_client.post(path, json={"password": password}, headers=headers)
+
+    assert reveal(None, "Password123!").status_code == 401  # not signed in, and the old default password is gone
+    assert reveal("user-token", "right-password").status_code == 403  # signed in, but not an administrator
+    assert reveal("admin-token", "Password123!").status_code == 401  # administrator, wrong password
+    assert proxy_store.audit_logs == []  # nothing was revealed so far
+
+    revealed = reveal("admin-token", "right-password")
+    assert revealed.status_code == 200 and revealed.json()["token"]
+    assert proxy_store.audit_logs[-1]["actor_email"] == "admin@example.com"
+
+    monkeypatch.setenv("ADMIN_PASSWORD", "ops-secret")  # an explicitly configured password still works
+    assert reveal("admin-token", "ops-secret").status_code == 200
+
+
+
+ADMIN_ONLY = [
+    ("get", "/centralwatch/proxy/keys", None),
+    ("get", "/centralwatch/proxy/roles", None),
+    ("get", "/centralwatch/proxy/history", None),
+    ("get", "/centralwatch/proxy/metrics", None),
+    ("get", "/centralwatch/proxy/quarantine", None),
+    ("get", "/centralwatch/proxy/audit-logs", None),
+    ("post", "/centralwatch/proxy/quarantine/unblock", {"ip_address": "198.51.100.42"}),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body"), ADMIN_ONLY)
+def test_management_endpoints_are_for_administrators_only(secured_client, method, path, body):
+    def call(token):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        return getattr(secured_client, method)(path, headers=headers, **({"json": body} if body else {}))
+
+    assert call(None).status_code == 401  # not signed in
+    assert call("user-token").status_code == 403  # signed in, but not an administrator
+    assert call("admin-token").status_code in (200, 404)  # 404 only for unblocking an IP that is not quarantined
+
+
+def test_only_an_administrator_can_unblock_an_ip_and_it_is_audited(secured_client, proxy_store):
+    proxy_store.quarantined["198.51.100.42"] = {"ip_address": "198.51.100.42"}
+
+    def unblock(token):
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        return secured_client.post("/centralwatch/proxy/quarantine/unblock", json={"ip_address": "198.51.100.42"}, headers=headers)
+
+    assert unblock(None).status_code == 401  # a blocked caller cannot release itself
+    assert unblock("user-token").status_code == 403
+    assert "198.51.100.42" in proxy_store.quarantined
+    assert unblock("admin-token").status_code == 200
+    assert "198.51.100.42" not in proxy_store.quarantined
+    assert proxy_store.audit_logs[-1]["actor_email"] == "admin@example.com"
+
+
+def test_proxy_health_is_open_and_shows_no_configuration(secured_client):
+    response = secured_client.get("/centralwatch/proxy/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

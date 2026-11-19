@@ -11,7 +11,7 @@ const THEME_KEY = "centralwatch-theme-preference";
 
 const SYSTEMS = [
   { key: "demo", name: "Demo application", purpose: "FastAPI business APIs", endpoint: ":8000", health: "/system/demo", port: "8000", path: "/docs" },
-  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: `${API_BASE}${PROXY_API}`, view: "proxy" },
+  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: `${API_BASE}/centralwatch/proxy/health`, view: "proxy" },
   { key: "grafana", name: "Grafana", purpose: "Dashboards and exploration", endpoint: ":3000", health: "/system/grafana", port: "3000" },
   { key: "prometheus", name: "Prometheus", purpose: "Metrics storage", endpoint: ":9091", health: "/system/prometheus", port: "9091" },
   { key: "alertmanager", name: "Alertmanager", purpose: "Alert dispatch & routing", endpoint: ":9093", health: "/system/alertmanager", port: "9093", path: "/#/alerts" },
@@ -534,7 +534,7 @@ function renderServices() {
         </div>
       </td>
       <td><code>${escapeHtml(service.api_key)}</code><small class="table-detail">${escapeHtml(service.auth_type || "bearer")}</small></td>
-      <td><strong>$${Number(service.monthly_budget_usd || 100).toFixed(2)}</strong><small class="table-detail">/ month</small></td>
+      <td><strong>$${Number(service.monthly_budget_usd ?? 100).toFixed(2)}</strong><small class="table-detail">/ month</small></td>
       <td>
         <div class="row-actions">
           <button class="table-button" type="button" data-copy-proxy="${escapeHtml(service.service_name)}">Copy endpoint</button>
@@ -651,7 +651,7 @@ function openRevealTokenDialog(type, targetName) {
   $("#reveal-token-target-type").value = type;
   $("#reveal-token-target-id").value = targetName;
   $("#reveal-token-dialog-title").textContent = `View Proxy Token: ${targetName}`;
-  $("#reveal-token-dialog-subtitle").textContent = `Enter administrator password to decrypt and view ${type} proxy token.`;
+  $("#reveal-token-dialog-subtitle").textContent = `Re-enter your sign-in password to decrypt and view the ${type} proxy token.`;
   $("#reveal-token-password").value = "";
   $("#revealed-token-box").hidden = true;
   $("#revealed-token-value").textContent = "";
@@ -742,7 +742,7 @@ function renderProxyMetrics(metrics) {
   $("#proxy-service-metrics-body").innerHTML = metrics.by_service.length ? metrics.by_service.map((service) => {
     const tokens = Number(service.tokens_used || 0);
     const cost = Number(service.cost_usd || 0);
-    const budget = Number(service.monthly_budget_usd || 100.0);
+    const budget = Number(service.monthly_budget_usd ?? 100);
     const percent = budget > 0 ? ((cost / budget) * 100).toFixed(1) : "0.0";
     return `<tr>
       <td><strong>${escapeHtml(service.service_name)}</strong></td>
@@ -785,8 +785,8 @@ function renderProxyHistory() {
 async function loadProxyObservability() {
   try {
     const [metrics, history] = await Promise.all([
-      apiRequest(PROXY_METRICS_API, { auth: false }),
-      apiRequest(`${PROXY_HISTORY_API}?limit=250`, { auth: false }),
+      apiRequest(PROXY_METRICS_API),
+      apiRequest(`${PROXY_HISTORY_API}?limit=250`),
     ]);
     renderProxyMetrics(metrics);
     state.proxyHistory = history;
@@ -798,7 +798,7 @@ async function loadProxyObservability() {
 
 async function loadQuarantinedIps() {
   try {
-    const list = await apiRequest(PROXY_QUARANTINE_API, { auth: false });
+    const list = await apiRequest(PROXY_QUARANTINE_API);
     state.quarantinedIps = list;
     renderQuarantinedIps();
   } catch (error) {
@@ -1441,11 +1441,14 @@ async function handleSecurityScan(event) {
   const target = $("#scan-target").value.trim();
   const button = $("#trigger-security-scan");
   closeSecurityReport();
+  resetScanProgress();
   $("#scan-progress").hidden = false;
   $("#scan-result").hidden = true;
   setBusy(button, true, "Scanning…");
+  $("#stop-security-scan").hidden = false;
   setScanState("Scanning", "warning");
-  setMessage($("#scan-message"), "Authenticated request accepted. Waiting for ASTF to finish.");
+  setMessage($("#scan-message"), "Scan running. ASTF stops by itself after 10 minutes; keep this page open until it finishes.");
+  startScanPolling();
   try {
     const result = await apiRequest(`/centralwatch/security-scan?target_url=${encodeURIComponent(target)}`, { method: "POST" });
     $("#scan-result-target").textContent = result.target;
@@ -1464,11 +1467,82 @@ async function handleSecurityScan(event) {
     recordActivity("Security scan", `${target} · ${result.report_bytes} bytes`, result.findings_detected ? "warning" : "success");
     showToast("OWASP security report generated");
   } catch (error) {
+    if (error.status === 499) {
+      setScanState("Stopped", "neutral");
+      setMessage($("#scan-message"), "Scan stopped. No report was written for it.");
+      recordActivity("Security scan stopped", target, "warning");
+      showToast("Security scan stopped");
+      return;
+    }
     setScanState("Failed", "error");
     setMessage($("#scan-message"), error.message, true);
     recordActivity("Security scan failed", error.message, "error");
     showToast(error.message, true);
-  } finally { $("#scan-progress").hidden = true; setBusy(button, false); }
+  } finally {
+    stopScanPolling();
+    $("#scan-progress").hidden = true;
+    const stop = $("#stop-security-scan");
+    setBusy(stop, false);
+    stop.hidden = true;
+    setBusy(button, false);
+  }
+}
+
+let scanPollTimer = null;
+
+function formatClock(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function resetScanProgress() {
+  renderScanProgress({ running: true, phase: "Starting the scanner", tasks_total: null, elapsed_seconds: 0, limit_seconds: 600 });
+}
+
+function renderScanProgress(status) {
+  if (!status?.running) return;
+  const known = Number(status.tasks_total) > 0;
+  const percent = known ? Math.min(100, Number(status.percent) || 0) : 0;
+  $("#scan-progress-phase").textContent = known ? `${status.phase} · ${Math.floor(percent)}%` : status.phase;
+  const bar = $("#scan-bar");
+  bar.classList.toggle("indeterminate", !known);
+  if (known) bar.setAttribute("aria-valuenow", String(Math.floor(percent)));
+  else bar.removeAttribute("aria-valuenow");
+  $("#scan-bar-fill").style.width = known ? `${percent}%` : "";
+  const parts = [];
+  if (known) parts.push(`${status.tasks_done} of ${status.tasks_total} tests`);
+  if (status.endpoints) parts.push(`${status.endpoints} endpoints`);
+  parts.push(`${formatClock(status.elapsed_seconds)} elapsed (stops by itself at ${formatClock(status.limit_seconds)})`);
+  $("#scan-progress-detail").textContent = parts.join(" · ");
+  $("#scan-progress-test").textContent = status.current_test ? `Now: ${status.current_test}` : "";
+}
+
+function startScanPolling() {
+  stopScanPolling();
+  const poll = async () => {
+    try {
+      renderScanProgress(await apiRequest("/centralwatch/security-scan/status"));
+    } catch (_) { /* keep showing the last progress; the scan request reports real errors */ }
+  };
+  scanPollTimer = setInterval(poll, 1500);
+  poll();
+}
+
+function stopScanPolling() {
+  clearInterval(scanPollTimer);
+  scanPollTimer = null;
+}
+
+async function stopSecurityScan() {
+  const button = $("#stop-security-scan");
+  setBusy(button, true, "Stopping…");
+  setMessage($("#scan-message"), "Stopping the scan…");
+  try {
+    await apiRequest("/centralwatch/security-scan/stop", { method: "POST" });
+  } catch (error) {
+    setBusy(button, false);
+    setMessage($("#scan-message"), error.message, true);
+  }
 }
 
 function securityReportThemeCss(theme) {
@@ -2128,6 +2202,7 @@ function bindEvents() {
   on("#chat-form", "submit", handleChatSubmit);
   on("#clear-chat", "click", clearChat);
   on("#security-scan-form", "submit", handleSecurityScan);
+  on("#stop-security-scan", "click", stopSecurityScan);
   on("#open-security-report", "click", openSecurityReport);
   on("#run-aws-security-scan", "click", runAwsSecurityScan);
   on("#select-agent-findings", "click", toggleAwsFindingSelection);

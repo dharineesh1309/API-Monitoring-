@@ -58,10 +58,13 @@ logs-%:
 health:
 	@bash scripts/healthcheck.sh
 
-## test: Run automated test suite
+## test: Run automated test suite (on this machine; needs pytest and both packages' requirements)
+PYTHON ?= python3
 test:
-	@echo "Running test suite inside demo-app..."
-	@docker compose exec demo-app pytest
+	@echo "Running the demo-app tests..."
+	@cd demo-app && AUTH_TOKEN_SECRET=test-only OTEL_SDK_DISABLED=true $(PYTHON) -m pytest tests -q
+	@echo "Running the centralwatch-security plugin tests..."
+	@AUTH_TOKEN_SECRET=test-only OTEL_SDK_DISABLED=true $(PYTHON) -m pytest centralwatch-security/tests -q
 
 ## status: Show container status
 status:
