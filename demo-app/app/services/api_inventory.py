@@ -8,16 +8,24 @@ severity, its OWASP API Security Top 10 (2023) category, evidence, the fix, and
 an AWS CLI command for the fix. Nothing in AWS is changed.
 
 With ``probe=True`` it also sends one unauthenticated GET per readable route and
-one TLS handshake per host, to confirm what is really open (see "Safe probe").
+two TLS handshakes per host, to confirm what is really open, record each API's
+health (answering, server errors, response time, certificate expiry) and find
+what the responses leak (see "Safe probe" and "Leak checks"). Settings that hold
+secrets (Lambda environment variables, API Gateway stage variables) are flagged
+by name; their values are never read into a finding.
 """
 
+import copy
+import json
 import re
 import socket
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,21 +44,29 @@ SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 NO_AUTH_CHECKS = {"route_no_auth", "url_no_auth"}
 
 API2 = "API2:2023 Broken Authentication"
+API3 = "API3:2023 Broken Object Property Level Authorization"
 API4 = "API4:2023 Unrestricted Resource Consumption"
 API8 = "API8:2023 Security Misconfiguration"
 API9 = "API9:2023 Improper Inventory Management"
 
 
+SCAN_BUDGET_SECONDS = 60  # reading settings; a normal crawl of 18 regions takes 6-12 s
+PROBE_BUDGET_SECONDS = 45  # per API at most 10 GETs + 2 TLS handshakes of 5 s each, all APIs in parallel
+
+
+def _late(source, region, seconds) -> dict[str, str]:
+    return {"source": source, "region": region, "error": (
+        f"No answer within {seconds}s, so it was skipped in this scan "
+        "(the AWS endpoint did not answer, or DNS lookups are hanging on this machine)."
+    )}
+
+
 def crawl(session, settings, probe: bool = False) -> dict[str, Any]:
+    """Never runs much past its time budget: whatever has not answered by then is reported as timed out and skipped,
+    so a slow network, a blocked endpoint or hanging DNS cannot stall a scan or the page waiting for it."""
+    budget = getattr(settings, "api_scan_time_budget_seconds", SCAN_BUDGET_SECONDS)
+    deadline = time.monotonic() + budget
     errors: list[dict[str, str]] = []
-    regions = _regions(session, settings, errors)
-    # boto3 sessions are not thread-safe for client creation, so build every client here first.
-    jobs = [
-        (source, region, collect, [make_client(session, s, settings, region=region) for s in services])
-        for region in regions
-        for source, (services, collect) in REGIONAL_SOURCES.items()
-    ]
-    jobs.append(("CloudFront", "global", _cloudfront, [make_client(session, "cloudfront", settings, region="us-east-1")]))
 
     def run(job):
         source, region, collect, clients = job
@@ -65,16 +81,43 @@ def crawl(session, settings, probe: bool = False) -> dict[str, Any]:
             _probe(api)
         except Exception as exc:  # noqa: BLE001 - a probe bug must not lose the inventory
             errors.append({"source": f"Probe of {api['name']}", "region": api["region"], "error": _error_text(exc)})
+        return api
 
-    with ThreadPoolExecutor(max_workers=16) as pool:
-        apis = [api for found in pool.map(run, jobs) for api in found]
-        if probe:
-            list(pool.map(probe_one, [api for api in apis if api["public"]]))
+    # ponytail: threads stuck past the budget are abandoned, not killed (Python cannot stop them); the app's
+    # DNS watchdog restarts the process if lookups hang for good, which is what leaves threads stuck.
+    pool = ThreadPoolExecutor(max_workers=16)
+    try:
+        try:
+            regions = pool.submit(_regions, session, settings, errors).result(timeout=budget)
+        except FutureTimeout:
+            errors.append(_late("EC2 regions", settings.aws_region, budget))
+            regions = [settings.aws_region]
+        # boto3 sessions are not thread-safe for client creation, so build every client here first.
+        jobs = [
+            (source, region, collect, [make_client(session, s, settings, region=region) for s in services])
+            for region in regions
+            for source, (services, collect) in REGIONAL_SOURCES.items()
+        ]
+        jobs.append(("CloudFront", "global", _cloudfront, [make_client(session, "cloudfront", settings, region="us-east-1")]))
+        futures = {pool.submit(run, job): job for job in jobs}
+        done, late = wait(futures, timeout=max(0.0, deadline - time.monotonic()))
+        apis = [api for future in done for api in future.result()]
+        errors += [_late(futures[future][0], futures[future][1], budget) for future in late]
+
+        if probe:  # each probe works on a copy, so one that finishes after the budget cannot change this result
+            probes = {pool.submit(probe_one, copy.deepcopy(api)): i for i, api in enumerate(apis) if api["public"]}
+            done, late = wait(probes, timeout=PROBE_BUDGET_SECONDS)
+            for future in done:
+                apis[probes[future]] = future.result()
+            errors += [_late(f"Probe of {apis[probes[f]]['name']}", apis[probes[f]]["region"], PROBE_BUDGET_SECONDS) for f in late]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     apis.sort(key=lambda api: (not api["public"], api["source"], api["region"], api["name"]))
     findings = sorted(
         (
-            {"id": f"{api['id']}:{f['check']}:{f['target']}", "source": api["source"], "region": api["region"], "api": api["name"], **f}
+            {"id": ":".join(filter(None, (api["id"], f["check"], f.get("kind"), f["target"]))),
+             "source": api["source"], "region": api["region"], "api": api["name"], **f}
             for api in apis
             for f in api.pop("findings")
         ),
@@ -91,6 +134,8 @@ def crawl(session, settings, probe: bool = False) -> dict[str, Any]:
             "errors": len(errors),
             "findings": {level: sum(f["severity"] == level for f in findings) for level in SEVERITY_ORDER},
             "probed_requests": sum(len(api.get("probe", [])) for api in apis),
+            "health": {state: sum(api.get("health", {}).get("status") == state for api in apis) for state in ("up", "errors", "down")},
+            "leaks": sum(f["check"] in LEAK_CHECKS for f in findings),
         },
         "apis": apis,
         "findings": findings,
@@ -227,6 +272,7 @@ def _rest_apis(region, client):
                             findings.append(_open_route(key, fix))
             for stage in stages:
                 name = stage["stageName"]
+                findings += _settings_secrets(stage.get("variables"), f"stage {name} variable", f"{api_id}/{name}", region)
                 rate = stage.get("methodSettings", {}).get("*/*", {}).get("throttlingRateLimit")
                 stage_cli = f"{cli} update-stage --rest-api-id {api_id} --stage-name {name} --patch-operations"
                 findings += _stage_findings(
@@ -277,6 +323,7 @@ def _http_apis(region, client):
                 ))
             for stage in stages:
                 name = stage["StageName"]
+                findings += _settings_secrets(stage.get("StageVariables"), f"stage {name} variable", f"{api_id}/{name}", region)
                 rate = (stage.get("DefaultRouteSettings") or {}).get("ThrottlingRateLimit")
                 stage_cli = f"{cli} update-stage --api-id {api_id} --stage-name '{name}'"
                 findings += _stage_findings(
@@ -305,7 +352,7 @@ def _lambda_urls(region, client):
         for function in page["Functions"]:
             name = function["FunctionName"]
             for config in client.list_function_url_configs(FunctionName=function["FunctionArn"])["FunctionUrlConfigs"]:
-                findings = []
+                findings = _settings_secrets(function.get("Environment", {}).get("Variables"), "environment variable", name, region)
                 if config["AuthType"] == "NONE":
                     findings.append(_finding(
                         "url_no_auth", "critical", API2, "function URL",
@@ -561,14 +608,42 @@ _opener = urllib.request.build_opener(_NoRedirect)
 
 
 def _get(url) -> dict[str, Any]:
+    """Status, headers, size, time taken and body text. The text is only scanned for leaks, never kept."""
     request = urllib.request.Request(url, headers={"Origin": PROBE_ORIGIN, "User-Agent": "CentralWatch-API-probe/1.0"})
+    started = time.perf_counter()
     try:
         with _opener.open(request, timeout=PROBE_TIMEOUT) as response:
-            return {"status": response.status, "headers": dict(response.headers), "bytes": len(response.read(PROBE_BODY_CAP))}
+            result = {"status": response.status, "headers": dict(response.headers), "body": response.read(PROBE_BODY_CAP)}
     except urllib.error.HTTPError as error:  # 3xx/4xx/5xx still tell us something
-        return {"status": error.code, "headers": dict(error.headers or {}), "bytes": len(error.read(PROBE_BODY_CAP))}
+        result = {"status": error.code, "headers": dict(error.headers or {}), "body": error.read(PROBE_BODY_CAP)}
     except Exception as exc:  # noqa: BLE001 - unreachable, TLS failure, timeout
-        return {"status": None, "headers": {}, "bytes": 0, "error": f"{type(exc).__name__}: {exc}"[:200]}
+        result = {"status": None, "headers": {}, "body": b"", "error": f"{type(exc).__name__}: {exc}"[:200]}
+    body = result.pop("body")
+    return {**result, "bytes": len(body), "text": body.decode("utf-8", "replace"), "ms": round((time.perf_counter() - started) * 1000)}
+
+
+def _cert_days(host, port) -> int | None:
+    """Whole days until the host's certificate expires (-1 = already expired); None without a verifiable certificate."""
+    try:
+        with ssl.create_default_context().wrap_socket(socket.create_connection((host, port), timeout=PROBE_TIMEOUT), server_hostname=host) as tls:
+            return int((ssl.cert_time_to_seconds(tls.getpeercert()["notAfter"]) - time.time()) // 86400)
+    except ssl.SSLCertVerificationError as exc:
+        return -1 if exc.verify_code == 10 else None  # 10 = X509_V_ERR_CERT_HAS_EXPIRED
+    except (OSError, ssl.SSLError, KeyError, ValueError):
+        return None
+
+
+def _describe(result) -> str:
+    """What a response carried, e.g. "JSON with 3 records" or "512 bytes"."""
+    try:
+        data = json.loads(result.get("text") or "")
+    except ValueError:
+        return f"{result['bytes']} bytes"
+    if isinstance(data, dict):
+        data = next((value for value in data.values() if isinstance(value, list)), data)
+    if isinstance(data, list):
+        return f"JSON with {len(data)} record{'' if len(data) == 1 else 's'}"
+    return f"a JSON object of {result['bytes']} bytes"
 
 
 def _old_tls(host, port) -> str | None:
@@ -601,13 +676,15 @@ def _probe_targets(api) -> list[tuple[str, str | None]]:
 
 
 def _probe(api) -> None:
-    """Probe one public API in place: record responses, confirm or annotate findings, add new ones."""
+    """Probe one public API in place: record responses and health, confirm or annotate findings, add new ones."""
     results = [{"url": url, "route": key, **_get(url)} for url, key in _probe_targets(api)]
     if api["source"] == "CloudFront":
         results += [{"url": f"https://{origin}/", "route": "origin", **_get(f"https://{origin}/")} for origin in api["details"]["origins"]]
     findings, region = api["findings"], api["region"]
     checks = {f["check"] for f in findings}
     answered = [r for r in results if r["status"] is not None and r["route"] != "origin"]
+    for result in results:
+        result["leaks"] = _leaks(result.get("text", ""))
 
     for finding in findings:  # confirm the "no authentication" findings with real responses
         if finding["check"] not in NO_AUTH_CHECKS:
@@ -616,7 +693,11 @@ def _probe(api) -> None:
         opened = next((r for r in mine if 200 <= r["status"] < 300), None)
         if opened:
             finding.update(confirmed=True, severity="critical")
-            finding["evidence"] += f" Confirmed: GET {opened['url']} returned {opened['status']} with {opened['bytes']} bytes and no credentials."
+            gave = [LEAKS[kind][3] for kind in opened["leaks"]]
+            finding["evidence"] += (
+                f" Confirmed: GET {opened['url']} returned {opened['status']} with {_describe(opened)} and no credentials"
+                + (f", including {', '.join(gave)}." if gave else ".")
+            )
         elif mine:
             finding["confirmed"] = False
             finding["evidence"] += f" The probe got {mine[0]['status']}, so the backend may check credentials itself; verify manually."
@@ -649,9 +730,46 @@ def _probe(api) -> None:
             "Terminate TLS in front of it (load balancer, API Gateway or CloudFront) and stop exposing the HTTP port.",
         ))
 
+    versioned = next(
+        ((r, name, value) for r in answered for name, value in r["headers"].items()
+         if name.lower() in VERSION_HEADERS or (name.lower() == "server" and re.search(r"\d", value))),
+        None,
+    )
+    if versioned:
+        r, name, value = versioned
+        findings.append({**_finding(
+            "version_header", "low", API8, "responses",
+            f"GET {r['url']} answered with {name}: {value}, which tells attackers what software and version to target.",
+            "Hide version details in the server or proxy settings (for example server_tokens off in nginx).",
+        ), "kind": "version_header"})
+
+    leaked: dict[str, list[dict]] = {}
+    for r in results:
+        for kind in r["leaks"]:
+            leaked.setdefault(kind, []).append(r)
+    for kind, hits in leaked.items():
+        severity, owasp, _, what = LEAKS[kind]
+        first = hits[0]
+        more = f" Also in {len(hits) - 1} more response{'s' if len(hits) > 2 else ''}." if len(hits) > 1 else ""
+        findings.append({**_finding(
+            "response_leak", severity, owasp, first["route"] or first["url"],
+            f"GET {first['url']} without credentials returned {first['status']} containing {what} "
+            f"({first['leaks'][kind]}, rest hidden).{more}",
+            LEAK_FIXES[kind],
+        ), "kind": kind})
+
+    hosts = sorted({(p.hostname, p.port or 443) for p in map(urllib.parse.urlsplit, api["urls"]) if p.scheme == "https"})
+    cert_days = _cert_days(*hosts[0]) if hosts else None
+    if cert_days is not None and cert_days < CERT_WARN_DAYS:
+        findings.append(_finding(
+            "cert_expiring", "high" if cert_days < 0 else "medium", API8, hosts[0][0],
+            ("The HTTPS certificate has expired" if cert_days < 0 else f"The HTTPS certificate expires in {cert_days} days")
+            + "; browsers and clients refuse the connection once it lapses.",
+            "Renew the certificate, or use an AWS Certificate Manager certificate, which renews itself.",
+        ))
+
     if "old_tls" not in checks:
-        hosts = {(p.hostname, p.port or 443) for p in map(urllib.parse.urlsplit, api["urls"]) if p.scheme == "https"}
-        for host, port in sorted(hosts):
+        for host, port in hosts:
             version = _old_tls(host, port)
             if not version:
                 continue
@@ -675,9 +793,104 @@ def _probe(api) -> None:
             "plus a secret header for load balancers.",
         ))
 
-    for result in results:
+    targets = [r for r in results if r["route"] != "origin"]
+    times = [r["ms"] for r in answered if "ms" in r]
+    server_errors = sum(r["status"] >= 500 for r in answered)
+    api["health"] = {
+        "status": "not checked" if not targets else "down" if not answered else "errors" if server_errors == len(answered) else "up",
+        "checked": len(targets),
+        "answered": len(answered),
+        "server_errors": server_errors,
+        "avg_ms": round(sum(times) / len(times)) if times else None,
+        "max_ms": max(times, default=None),
+        "cert_days": cert_days,
+    }
+    for result in results:  # keep what was found, never the response itself
         result.pop("headers")
+        result.pop("text", None)
+        result["leaks"] = sorted(result["leaks"])
     api["probe"] = results
+
+
+# ---------------------------------------------------------------- Leak checks
+# kind -> (severity, OWASP category, pattern, what a reader calls it). A finding keeps the kind,
+# where it was seen and a masked hint; the matched text itself is never stored or returned.
+LEAKS = {
+    "aws_access_key": ("critical", API8, re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"), "an AWS access key"),
+    "private_key": ("critical", API8, re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "a private key"),
+    "card_number": ("critical", API3, re.compile(r"\b(?:4\d{12}(?:\d{3})?|5[1-5]\d{14}|3[47]\d{13})\b"), "a payment card number"),
+    "access_token": ("high", API8, re.compile(r"\beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}"), "an access token (JWT)"),
+    "secret_value": (
+        "high", API8,
+        re.compile(r"(?i)(?<![a-z])(?:api[_-]?key|secret(?:[_-]?key)?|password|passwd|access[_-]?token)[\"']?\s*[:=]\s*[\"']?([^\s\"',;{}]{6,})"),
+        "a secret value",
+    ),
+    "email": ("high", API3, re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}\b"), "an email address"),
+    "phone": ("high", API3, re.compile(r"(?<![\w+])\+\d{1,3}[ -]?\d{6,12}\b"), "a phone number"),
+    "stack_trace": (
+        "medium", API8,
+        re.compile(r"Traceback \(most recent call last\)|Exception in thread|\bat [\w$.]+\([\w$]+\.java:\d+\)|\.py\", line \d+|/node_modules/"),
+        "an error stack trace",
+    ),
+    "internal_ip": ("medium", API8, re.compile(r"\b(?:10\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}\b"), "an internal IP address"),
+}
+_ROTATE = "Remove it from the response and rotate it now: anyone who called this route has seen it."
+_PERSONAL = "Require sign-in on this route and return only the fields the caller needs, masking personal data."
+LEAK_FIXES = {
+    "aws_access_key": _ROTATE, "private_key": _ROTATE, "access_token": _ROTATE, "secret_value": _ROTATE,
+    "card_number": _PERSONAL, "email": _PERSONAL, "phone": _PERSONAL,
+    "stack_trace": "Return a generic error message; keep error details in the server logs only.",
+    "internal_ip": "Strip internal addresses from responses and error pages.",
+}
+LEAK_CHECKS = {"response_leak", "settings_secret", "version_header"}
+LEAK_KINDS = {**{kind: spec[0] for kind, spec in LEAKS.items()}, "settings_secret": "high", "version_header": "low"}  # kind -> severity
+VERSION_HEADERS = {"x-powered-by", "x-aspnet-version", "x-aspnetmvc-version"}
+CERT_WARN_DAYS = 14
+SECRET_NAME = re.compile(r"(?i)passw|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential")
+
+
+def _mask(text: str) -> str:
+    return f"{text[:4]}…" if len(text) > 4 else "…"
+
+
+def _luhn(number: str) -> bool:
+    total = 0
+    for i, digit in enumerate(int(d) for d in reversed(number)):
+        digit *= 2 if i % 2 else 1
+        total += digit - 9 if digit > 9 else digit
+    return total % 10 == 0
+
+
+def _leaks(text: str) -> dict[str, str]:
+    """kind -> masked first match, for every leak pattern found in the text."""
+    found = {}
+    for kind, (_, _, pattern, _) in LEAKS.items():
+        hits = [m.group(m.lastindex or 0) for m in pattern.finditer(text)]
+        if kind == "card_number":
+            hits = [h for h in hits if _luhn(h)]  # long numbers that only look like cards
+        if kind == "secret_value":
+            hits = [h for h in hits if h.strip("*xX•.")]  # "password": "********" is already masked
+        if hits:
+            found[kind] = _mask(hits[0])
+    return found
+
+
+def _settings_secrets(variables, where, secret_prefix, region) -> list[dict[str, str]]:
+    """Variables that hold a secret, judged by name or value. Only the variable's name is reported."""
+    def secret(name, value):
+        value = str(value)
+        if value.startswith("arn:"):  # a reference to Secrets Manager or SSM is the right way to do it
+            return False
+        named = SECRET_NAME.search(name) and len(value) >= 8 and not value.isdigit()
+        return named or any(LEAKS[kind][2].search(value) for kind in ("aws_access_key", "private_key", "access_token"))
+
+    return [{**_finding(
+        "settings_secret", "high", API8, f"{where} {name}",
+        f"The {where} {name} looks like a secret stored in plain text in the API's AWS settings, "
+        "where anyone who can read the configuration sees it (value not shown).",
+        "Move it to AWS Secrets Manager (or the CentralWatch wallet) and read it at runtime.",
+        f"aws secretsmanager create-secret --region {region} --name {secret_prefix}/{name} --secret-string <value>",
+    ), "kind": "settings_secret"} for name, value in sorted((variables or {}).items()) if secret(name, value)]
 
 
 def _error_text(exc: Exception) -> str:

@@ -1,7 +1,6 @@
-"""The API watcher picks out exposure-changing CloudTrail events once, and publishes each scan."""
+"""The API watcher publishes each scan, logs only what changed, and runs scheduled scans with the probe on."""
 
 import logging
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.services import api_watch
@@ -18,43 +17,74 @@ class Instrument:
     add = set
 
 
-def event(event_id, name):
-    return {"EventId": event_id, "EventName": name, "Username": "dev-user", "EventTime": datetime(2026, 11, 18, tzinfo=timezone.utc)}
+def metrics():
+    names = ("apis", "findings", "rescans", "up", "response_time", "leaks", "deep_test_findings")
+    return SimpleNamespace(**{f"api_exposure_{name}": Instrument() for name in names})
 
 
-def test_poll_returns_each_exposure_event_once(monkeypatch):
-    page = {"Events": [event("e1", "AddPermission20150331v2"), event("e2", "PutObject"), event("e3", "CreateRestApi")]}
-    cloudtrail = SimpleNamespace(get_paginator=lambda _: SimpleNamespace(paginate=lambda **_: [page]))
-    monkeypatch.setattr(api_watch, "_regions", lambda *_: ["ap-south-1"])
-    monkeypatch.setattr(api_watch, "make_client", lambda *_, **__: cloudtrail)
-    watch = ApiWatch(object(), SimpleNamespace(), None)
-
-    first = watch.poll_cloudtrail()
-    assert [(e["event"], e["user"], e["region"]) for e in first] == [
-        ("AddPermission", "dev-user", "ap-south-1"),  # Lambda's versioned event name, normalised
-        ("CreateRestApi", "dev-user", "ap-south-1"),
-    ]
-    assert watch.poll_cloudtrail() == []  # the overlapping lookback window does not re-trigger
+def scan(open_apis, health, leaks=()):
+    findings = [{"source": "Lambda function URL", "region": "ap-south-1", "api": name, "check": "url_no_auth", "target": "function URL"}
+                for name in open_apis]
+    findings += [{"source": "API Gateway HTTP", "region": "ap-south-1", "api": "orders", "check": "response_leak", "kind": kind,
+                  "target": "GET /users"} for kind in leaks]
+    api = {"name": "orders", "source": "API Gateway HTTP", "region": "ap-south-1",
+           "health": {"status": health, "checked": 2, "answered": 2 if health == "up" else 0, "server_errors": 0,
+                      "avg_ms": 90 if health == "up" else None}}
+    summary = {"total": 3, "public": 2, "unauthenticated": len(open_apis),
+               "findings": {"critical": len(open_apis), "high": len(leaks), "medium": 1, "low": 0}}
+    return {"summary": summary, "findings": findings, "apis": [api]}
 
 
-def test_record_publishes_metrics_and_logs_newly_unauthenticated_apis(caplog):
-    metrics = SimpleNamespace(api_exposure_apis=Instrument(), api_exposure_findings=Instrument(), api_exposure_rescans=Instrument())
-    watch = ApiWatch(object(), SimpleNamespace(), metrics)
+def test_record_publishes_metrics_and_logs_new_exposures_leaks_and_outages(caplog):
+    m = metrics()
+    watch = ApiWatch(object(), SimpleNamespace(), m)
+    probed = {"type": "scheduled", "probe": True}
 
-    def scan(open_apis):
-        findings = [{"source": "Lambda function URL", "region": "ap-south-1", "api": name, "check": "url_no_auth"} for name in open_apis]
-        summary = {"total": 3, "public": 2, "unauthenticated": len(open_apis),
-                   "findings": {"critical": len(open_apis), "high": 0, "medium": 1, "low": 0}}
-        return {"summary": summary, "findings": findings}
+    watch.record(scan(["old-fn"], "up"), {"type": "startup", "probe": True})
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        latest = watch.record(scan(["old-fn", "new-fn"], "down", leaks=["email"]), probed)
+        watch.record(scan(["old-fn", "new-fn"], "up", leaks=["email"]), probed)
 
-    watch.record(scan(["old-fn"]), {"type": "startup"})
-    with caplog.at_level(logging.WARNING):
-        latest = watch.record(scan(["old-fn", "new-fn"]), {"type": "cloudtrail", "events": []})
-
-    assert watch.latest is latest and latest["trigger"]["type"] == "cloudtrail"
+    assert watch.latest["trigger"] == probed and latest["summary"]["unauthenticated"] == 2
     assert [r.getMessage() for r in caplog.records] == [
-        "API exposure: newly exposed API without authentication: Lambda function URL new-fn in ap-south-1"
+        "API exposure: newly exposed API without authentication: Lambda function URL new-fn in ap-south-1",
+        "API exposure: data leak on orders: an email address at GET /users",
+        "API exposure: orders (API Gateway HTTP, ap-south-1) is down: 0 of 2 probed routes answered, 0 with server errors",
+        "API exposure: orders is answering again",  # the third scan; the leak is not logged twice
     ]
-    assert metrics.api_exposure_apis.calls[-3:] == [(3, {"exposure": "total"}), (2, {"exposure": "public"}), (2, {"exposure": "unauthenticated"})]
-    assert (2, {"severity": "critical"}) in metrics.api_exposure_findings.calls
-    assert metrics.api_exposure_rescans.calls == [(1, {"trigger": "startup"}), (1, {"trigger": "cloudtrail"})]
+    labels = {"api": "orders", "source": "API Gateway HTTP", "region": "ap-south-1"}
+    assert m.api_exposure_up.calls == [(1, labels), (0, labels), (1, labels)]
+    assert m.api_exposure_response_time.calls == [(90, labels), (90, labels)]  # no time when nothing answered
+    assert (1, {"kind": "email", "severity": "high"}) in m.api_exposure_leaks.calls
+    assert (0, {"kind": "aws_access_key", "severity": "critical"}) in m.api_exposure_leaks.calls  # cleared kinds read 0
+    assert [call[1]["trigger"] for call in m.api_exposure_rescans.calls] == ["startup", "scheduled", "scheduled"]
+
+
+def test_a_manual_scan_without_probe_does_not_make_known_leaks_look_new(caplog):
+    watch = ApiWatch(object(), SimpleNamespace(), metrics())
+    watch.record(scan([], "up", leaks=["email"]), {"type": "startup", "probe": True})
+    watch.record(scan([], "not checked"), {"type": "manual", "probe": False})  # sees no response leaks
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        watch.record(scan([], "up", leaks=["email"]), {"type": "scheduled", "probe": True})
+    assert caplog.records == []
+
+
+def test_manual_scan_without_probe_leaves_health_and_leak_metrics_alone():
+    m = metrics()
+    ApiWatch(object(), SimpleNamespace(), m).record(scan([], "not checked"), {"type": "manual", "probe": False})
+    assert m.api_exposure_up.calls == [] and m.api_exposure_leaks.calls == []
+
+
+def test_rescan_probes_and_deep_test_publishes(monkeypatch):
+    m = metrics()
+    crawled = []
+    monkeypatch.setattr(api_watch, "crawl", lambda session, settings, probe: crawled.append(probe) or scan([], "up"))
+    result = {"tested": ["cw-lab-orders"], "summary": {"findings": {"critical": 0, "high": 9, "medium": 11, "low": 0}}}
+    monkeypatch.setattr(api_watch.api_astf, "deep_test", lambda session, settings, api_ids: result)
+    watch = ApiWatch(object(), SimpleNamespace(), m)
+
+    assert watch.rescan("scheduled")["trigger"] == {"type": "scheduled", "probe": True} and crawled == [True]
+    assert watch.deep_test() is result and watch.latest_deep_test is result
+    assert (9, {"severity": "high"}) in m.api_exposure_deep_test_findings.calls

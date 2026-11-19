@@ -12,7 +12,7 @@ from ..schemas.security_agent import (
     SecurityScanResponse,
 )
 from ..services import Container
-from ..services.api_astf import DeepTestBusy, deep_test
+from ..services.api_astf import DeepTestBusy
 from ..services.api_inventory import crawl
 
 router = APIRouter(
@@ -48,7 +48,7 @@ async def api_inventory(probe: bool = False, container: Container = Depends(get_
     return container.api_watch.record(result, {"type": "manual", "probe": probe})
 
 
-@router.get("/api-inventory/latest", summary="The latest API exposure scan (manual, startup or CloudTrail-triggered)")
+@router.get("/api-inventory/latest", summary="The latest API exposure scan (manual, startup or scheduled)")
 def latest_api_inventory(container: Container = Depends(get_container)) -> dict:
     if not container.api_watch.latest:
         raise HTTPException(status_code=404, detail="No API exposure scan has run yet.")
@@ -66,15 +66,20 @@ async def api_deep_test(
     """Sends attack traffic (bursts, state-changing calls, injection payloads) to allow-listed APIs only."""
 
     try:
-        return await asyncio.to_thread(
-            deep_test, container.session, container.settings, body.api_ids if body else None
-        )
+        return await asyncio.to_thread(container.api_watch.deep_test, body.api_ids if body else None)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DeepTestBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api-astf/latest", summary="The latest ASTF deep test (manual or scheduled)")
+def latest_api_deep_test(container: Container = Depends(get_container)) -> dict:
+    if not container.api_watch.latest_deep_test:
+        raise HTTPException(status_code=404, detail="No deep test has run yet.")
+    return container.api_watch.latest_deep_test
 
 
 @router.post(

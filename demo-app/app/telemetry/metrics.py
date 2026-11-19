@@ -63,6 +63,26 @@ class BusinessMetrics:
         )
         self.api_exposure_rescans = meter.create_counter(
             "api_exposure.rescans_total",
-            description="API exposure scans, by trigger (manual/startup/cloudtrail)",
+            description="API exposure scans, by trigger (manual/startup/scheduled)",
             unit="{scan}",
+        )
+        self.api_exposure_up = meter.create_gauge(
+            "api_exposure.up",
+            description="1 if the exposed API answered the last probe without only server errors, else 0",
+            unit="{state}",
+        )
+        self.api_exposure_response_time = meter.create_gauge(
+            "api_exposure.response_time",
+            description="Average response time of the exposed API's probed routes at the last scan",
+            unit="ms",
+        )
+        self.api_exposure_leaks = meter.create_gauge(
+            "api_exposure.leaks",
+            description="Data leaks found at the last probed scan, by kind and severity",
+            unit="{leak}",
+        )
+        self.api_exposure_deep_test_findings = meter.create_gauge(
+            "api_exposure.deep_test_findings",
+            description="OWASP ASTF deep test findings at the last run, by severity",
+            unit="{finding}",
         )

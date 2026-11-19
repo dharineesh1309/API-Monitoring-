@@ -328,3 +328,6 @@ demo-app/.pytest_cache/
 
 !.env.example
 !.env.aws.example
+
+# Optional local copies of build downloads (demo-app/vendor/README.md)
+demo-app/vendor/*.jar

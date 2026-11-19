@@ -5,7 +5,11 @@ AWS_ENDPOINT_URL is set, real AWS default endpoints otherwise.
 """
 
 import asyncio
+import os
+import socket
+import sys
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -22,6 +26,7 @@ from .config.settings import get_settings
 from .routes import auth, chat, files, images, notifications, orders, queue, security_agent, simulate
 from .routes.simulate import SimulatedAWSError, SimulatedBruteForceBlocked, SimulatedFailure
 from .services import Container
+from .services.api_astf import DeepTestBusy
 from .telemetry.instrumentation import configure_telemetry, instrument_app, shutdown_telemetry
 from .telemetry.logging import get_logger, setup_logging
 from .utils.aws import aws_error_response
@@ -97,21 +102,53 @@ async def _reconcile_loop(container: Container) -> None:
 
 
 async def _api_watch_loop(container: Container) -> None:
-    """Scan API exposure at startup, then rescan whenever CloudTrail shows an API change."""
-    watch = container.api_watch
-    try:
-        await asyncio.to_thread(watch.poll_cloudtrail)  # mark recent events seen; the startup scan covers them
-        await asyncio.to_thread(watch.rescan, "startup")
-    except Exception:
-        logger.exception("Startup API exposure scan failed; CloudTrail polling continues")
+    """Scan and probe every exposed API at startup, then on a fixed schedule."""
+    trigger = "startup"
     while True:
-        await asyncio.sleep(container.settings.api_rescan_interval_seconds)
         try:
-            events = await asyncio.to_thread(watch.poll_cloudtrail)
-            if events:
-                await asyncio.to_thread(watch.rescan, "cloudtrail", events)
+            await asyncio.to_thread(container.api_watch.rescan, trigger)
         except Exception:
-            logger.exception("CloudTrail-triggered API exposure rescan failed; will retry")
+            logger.exception("API exposure scan failed; retrying at the next interval")
+        trigger = "scheduled"
+        await asyncio.sleep(container.settings.api_rescan_interval_seconds)
+
+
+async def _api_deep_test_loop(container: Container) -> None:
+    """Run the OWASP ASTF deep test on the allow-listed APIs on a schedule; the first run waits one interval."""
+    while True:
+        await asyncio.sleep(container.settings.api_deep_test_interval_seconds)
+        try:
+            await asyncio.to_thread(container.api_watch.deep_test)
+        except DeepTestBusy:
+            logger.info("Scheduled API deep test skipped: another deep test is running")
+        except Exception:
+            logger.exception("Scheduled API deep test failed; retrying at the next interval")
+
+
+DNS_HANG_SECONDS = 30  # a failing lookup gives up in ~10 s; one still running after 30 s is hung
+
+
+async def _dns_watchdog(container: Container) -> None:
+    """Restart the app when DNS lookups hang, instead of letting every AWS call hang behind them.
+
+    Under Docker Desktop's (WSL2) kernel, a glibc lookup can block for good inside its netlink query while
+    holding a process-wide lock, typically after sleep or a network change. Every later lookup in the
+    process then waits on that lock, and only a new process recovers. Exiting lets Docker's restart
+    policy start a fresh one within seconds.
+    """
+    settings = container.settings
+    host = urllib.parse.urlsplit(settings.aws_endpoint_url).hostname if settings.aws_endpoint_url else f"sts.{settings.aws_region}.amazonaws.com"
+    while True:
+        await asyncio.sleep(settings.dns_watchdog_interval_seconds)
+        try:
+            await asyncio.wait_for(asyncio.to_thread(socket.getaddrinfo, host, 443), timeout=DNS_HANG_SECONDS)
+        except asyncio.TimeoutError:
+            logger.critical("DNS lookup of %s has hung for %ss; restarting the app so lookups work again", host, DNS_HANG_SECONDS)
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(3)  # a normal exit would wait for the stuck threads forever
+        except OSError:
+            pass  # a lookup that fails fast is a network problem, not a hang
 
 
 async def _lambda_warmup(container: Container) -> None:
@@ -175,10 +212,18 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("PostgresProxyStore initialization deferred/unavailable: %s", exc)
 
-    # CloudTrail Event History exists only on real AWS (LocalStack needs Pro for it).
+    dns_watchdog_task: asyncio.Task | None = None
+    if settings.dns_watchdog_interval_seconds > 0:
+        dns_watchdog_task = asyncio.create_task(_dns_watchdog(container))
+
+    # Scheduled API scans only make sense on real AWS (LocalStack emulates few of these services).
     api_watch_task: asyncio.Task | None = None
-    if not container.initializer.is_localstack and settings.api_rescan_interval_seconds > 0:
-        api_watch_task = asyncio.create_task(_api_watch_loop(container))
+    api_deep_test_task: asyncio.Task | None = None
+    if not container.initializer.is_localstack:
+        if settings.api_rescan_interval_seconds > 0:
+            api_watch_task = asyncio.create_task(_api_watch_loop(container))
+        if settings.api_deep_test_interval_seconds > 0:
+            api_deep_test_task = asyncio.create_task(_api_deep_test_loop(container))
 
     http_client = getattr(app.state, "centralwatch_proxy_http_client", None)
     owns_http_client = http_client is None
@@ -199,10 +244,11 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-    for task in (reconcile_task, warmup_task, api_watch_task):
+    background = (reconcile_task, warmup_task, api_watch_task, api_deep_test_task, dns_watchdog_task)
+    for task in background:
         if task is not None:
             task.cancel()
-    for task in (reconcile_task, warmup_task, api_watch_task):
+    for task in background:
         try:
             if task is not None:
                 await task

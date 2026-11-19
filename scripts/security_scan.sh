@@ -17,7 +17,7 @@ mkdir -p "$REPORT_DIR"
 if [ ! -f "$ASTF_JAR" ]; then
     echo "Downloading OWASP ASTF..."
     tmp_jar="${ASTF_JAR}.tmp"
-    curl --fail --show-error --silent --location --retry 3 \
+    curl --fail --show-error --silent --location --connect-timeout 20 --max-time 300 --retry 3 \
         "https://github.com/OWASP/www-project-api-security-testing-framework/releases/download/v2.0.1/astf-v2.0.1.jar" \
         --output "$tmp_jar"
     test -s "$tmp_jar"

@@ -304,6 +304,8 @@ input[type="file"] { height: auto; min-height: 36px; padding: 6px; }
 .severity-label { color: var(--muted-strong); font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .severity-label.high { color: var(--danger); }
 .severity-label.medium { color: var(--warning); }
+.severity-label.critical { color: var(--danger); text-decoration: underline; }
+.probe-option { display: flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 11px; cursor: pointer; }
 .risk-copy { color: var(--text); font-size: 11px; line-height: 1.5; }
 .remediation-copy { color: var(--muted-strong); font-size: 11px; line-height: 1.4; }
 
@@ -384,11 +386,56 @@ input[type="file"] { height: auto; min-height: 36px; padding: 6px; }
   .dialog::backdrop { background: #07101eb8; }
 }
 
+/* API security dashboard (Overview). Severity colours: critical = danger, high = coral, medium = warning, low = muted. */
+.apisec-card { margin-bottom: 12px; }
+.apisec-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.apisec-kpi { min-width: 0; padding: 11px 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-subtle); }
+.apisec-kpi span, .apisec-kpi small { display: block; color: var(--muted); font-size: 10px; }
+.apisec-kpi span { font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.apisec-kpi strong { display: block; margin: 6px 0 3px; color: var(--text); font-family: var(--mono); font-size: 22px; font-weight: 730; line-height: 1.05; letter-spacing: -.04em; }
+.apisec-kpi.bad strong { color: var(--danger); }
+.apisec-kpi.warn strong { color: var(--warning); }
+.apisec-kpi.good strong { color: var(--success); }
+.apisec-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.apisec-grid.wide-left { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); margin-bottom: 0; }
+.apisec-panel { min-width: 0; padding: 13px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-elevated); }
+.apisec-panel h3 { margin: 0 0 11px; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
+.apisec-donut-wrap { display: flex; align-items: center; gap: 18px; }
+.apisec-donut { flex: none; display: grid; place-items: center; width: 104px; aspect-ratio: 1; border-radius: 50%;
+  background: conic-gradient(var(--danger) 0 calc(var(--c) * 1%), var(--coral) 0 calc((var(--c) + var(--h)) * 1%),
+    var(--warning) 0 calc((var(--c) + var(--h) + var(--m)) * 1%), var(--border-strong) 0 100%); }
+.apisec-donut::after { display: flex; align-items: center; justify-content: center; width: 64%; aspect-ratio: 1; border-radius: 50%; background: var(--surface-elevated); color: var(--text); font-family: var(--mono); font-size: 20px; font-weight: 730; content: attr(data-total); }
+.apisec-legend { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 11px; }
+.apisec-legend li { display: flex; align-items: center; gap: 7px; color: var(--muted-strong); }
+.apisec-legend b { width: 9px; height: 9px; border-radius: 2px; background: var(--sev); }
+.apisec-legend em { margin-left: auto; padding-left: 10px; color: var(--text); font-family: var(--mono); font-style: normal; font-weight: 700; }
+.apisec-bars { display: grid; gap: 9px; }
+.apisec-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; color: var(--muted-strong); font-size: 11px; }
+.apisec-bar > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apisec-bar > em { color: var(--text); font-family: var(--mono); font-style: normal; font-weight: 700; }
+.apisec-bar > b { grid-column: 1 / -1; height: 7px; overflow: hidden; border-radius: 4px; background: var(--surface-tint); }
+.apisec-bar > b > i { display: block; width: var(--w); height: 100%; border-radius: 4px; background: var(--bar, var(--accent)); }
+.apisec-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--dot); vertical-align: 1px; }
+.apisec-fixes { display: grid; gap: 8px; }
+.apisec-fix { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--sev); border-radius: 8px; background: var(--surface); }
+.apisec-fix > div { min-width: 0; }
+.apisec-fix strong { color: var(--text); font-size: 12px; }
+.apisec-fix p { margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.apisec-fix .remediation-copy { display: block; margin-top: 5px; }
+.apisec-fix code { display: block; margin-top: 6px; padding: 6px 8px; overflow-x: auto; border-radius: 6px; background: var(--surface-subtle); color: var(--muted-strong); font-family: var(--mono); font-size: 10px; white-space: pre; }
+.apisec-apis { display: grid; gap: 8px; }
+.apisec-api { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.apisec-api:last-child { padding-bottom: 0; border-bottom: 0; }
+.apisec-api strong { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.apisec-api small { grid-column: 1 / -1; color: var(--muted); }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1120px) {
   .topbar { padding-right: 18px; padding-left: 18px; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apisec-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .apisec-grid, .apisec-grid.wide-left { grid-template-columns: minmax(0, 1fr); }
   .proxy-metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .overview-grid, .proxy-grid, .proxy-access-grid, .security-grid, .chat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-grid .span-3, .proxy-grid .span-3, .proxy-access-grid .span-3 { grid-column: span 2; }
@@ -422,6 +469,8 @@ input[type="file"] { height: auto; min-height: 36px; padding: 6px; }
 
 @media (max-width: 680px) {
   .topbar-title small, .topbar-actions .button:last-child { display: none; }
+  .apisec-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apisec-fix { grid-template-columns: minmax(0, 1fr); }
   .page-heading, .card-header.stack-mobile { align-items: stretch; flex-direction: column; }
   .page-heading h1 { font-size: 25px; }
   .page-heading .button-row { align-self: flex-start; }

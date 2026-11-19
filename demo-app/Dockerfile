@@ -24,6 +24,18 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl default-jre-headless && \
     rm -rf /var/lib/apt/lists/*
 
+# Bake the pinned scanner into the image, checksum-verified, so scans never need GitHub at runtime and a
+# rebuilt or recreated container still has it. Same version and hash as app/services/api_astf.py.
+# A copy in demo-app/vendor/ is used when present (for networks that block GitHub); otherwise it is
+# downloaded, with time limits so a blocked network fails the build quickly instead of hanging it.
+ARG ASTF_URL=https://github.com/OWASP/www-project-api-security-testing-framework/releases/download/v2.0.1/astf-v2.0.1.jar
+ARG ASTF_SHA256=ea9defba5bf0a83550cf1072a39649b0a0f5507f66a49578d557a28185cc5954
+COPY demo-app/vendor/ /tmp/vendor/
+RUN if [ -f /tmp/vendor/astf-v2.0.1.jar ]; then mv /tmp/vendor/astf-v2.0.1.jar /app/astf-v2.0.1.jar; \
+    else curl --fail --show-error --silent --location --connect-timeout 20 --max-time 300 --retry 3 "$ASTF_URL" -o /app/astf-v2.0.1.jar; fi && \
+    echo "$ASTF_SHA256  /app/astf-v2.0.1.jar" | sha256sum -c - && \
+    rm -rf /tmp/vendor
+
 COPY demo-app/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

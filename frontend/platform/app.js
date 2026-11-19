@@ -11,7 +11,7 @@ const THEME_KEY = "centralwatch-theme-preference";
 
 const SYSTEMS = [
   { key: "demo", name: "Demo application", purpose: "FastAPI business APIs", endpoint: ":8000", health: "/system/demo", port: "8000", path: "/docs" },
-  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: PROXY_API, view: "proxy" },
+  { key: "proxy", name: "API proxy", purpose: "Credential injection and IP policy", endpoint: "/api/centralwatch/proxy", health: `${API_BASE}${PROXY_API}`, view: "proxy" },
   { key: "grafana", name: "Grafana", purpose: "Dashboards and exploration", endpoint: ":3000", health: "/system/grafana", port: "3000" },
   { key: "prometheus", name: "Prometheus", purpose: "Metrics storage", endpoint: ":9091", health: "/system/prometheus", port: "9091" },
   { key: "alertmanager", name: "Alertmanager", purpose: "Alert dispatch & routing", endpoint: ":9093", health: "/system/alertmanager", port: "9093", path: "/#/alerts" },
@@ -454,6 +454,13 @@ function signOut() {
   showView("login");
 }
 
+async function usesRealAws() {
+  try {
+    const health = await (await fetch("/system/demo", { cache: "no-store" })).json();
+    return health.aws_mode === "aws";
+  } catch (_) { return false; } // unknown: keep showing every service
+}
+
 async function checkSystem(system) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 5000);
@@ -477,7 +484,9 @@ function renderSystems(results) {
 async function loadHealth() {
   const button = $("#refresh-health");
   setBusy(button, true, "Checking…");
-  const results = await Promise.all(SYSTEMS.map(checkSystem));
+  // LocalStack only runs in the local development stack; on real AWS it is not part of the system.
+  const systems = await usesRealAws() ? SYSTEMS.filter((system) => system.key !== "localstack") : SYSTEMS;
+  const results = await Promise.all(systems.map(checkSystem));
   renderSystems(results);
   const online = results.filter((item) => item.online).length;
   const telemetryKeys = new Set(["grafana", "prometheus", "loki", "tempo", "collector"]);
@@ -1125,6 +1134,277 @@ async function applyAwsSecurityFindings() {
   } finally { setBusy(button, false); updateAwsAgentSelection(); }
 }
 
+function apiScanTrigger(trigger = {}) {
+  if (trigger.type === "scheduled") return "Scanned and probed automatically on the regular schedule.";
+  if (trigger.type === "startup") return "Scanned and probed automatically when the app started.";
+  return trigger.probe ? "Manual scan with live probe." : "Manual scan.";
+}
+
+function apiHealthCell(health) {
+  if (!health || health.status === "not checked") return `<span class="status-badge neutral"><i></i>Not probed</span>`;
+  const label = { up: "Up", down: "Down", errors: "Server errors" }[health.status];
+  const details = [`${health.answered}/${health.checked} routes answered`];
+  if (health.avg_ms != null) details.push(`${health.avg_ms} ms`);
+  if (health.cert_days != null) details.push(health.cert_days < 0 ? "certificate expired" : `certificate ${health.cert_days} days left`);
+  return `<span class="status-badge ${health.status === "up" ? "success" : "error"}"><i></i>${label}</span><small class="table-detail">${escapeHtml(details.join(" · "))}</small>`;
+}
+
+function renderApiInventory(inventory) {
+  state.apiInventory = inventory;
+  const { summary } = inventory;
+  const health = summary.health || {};
+  const probed = (health.up || 0) + (health.errors || 0) + (health.down || 0);
+  $("#api-inventory-meta").textContent = `${summary.total} API${summary.total === 1 ? "" : "s"} in ${summary.regions} regions: ${summary.public} public, ${summary.unauthenticated} with unauthenticated routes.${probed ? ` Health: ${health.up} up, ${health.errors + health.down} down or failing.` : ""} ${apiScanTrigger(inventory.trigger)} ${new Date(inventory.generated_at).toLocaleString()}`;
+  $$("[data-api-report]").forEach((button) => { button.disabled = false; });
+  $("#api-inventory-body").innerHTML = inventory.apis.map((api) => {
+    const open = inventory.findings.filter((finding) => finding.api === api.name && finding.source === api.source && finding.region === api.region
+      && (finding.check === "route_no_auth" || finding.check === "url_no_auth")).length;
+    const auth = api.auth ?? "Set by the application";
+    return `<tr>
+      <td><strong>${escapeHtml(api.source)}</strong><small class="table-detail">${escapeHtml(api.region)}</small></td>
+      <td><strong>${escapeHtml(api.name)}</strong><code>${escapeHtml(api.id)}</code></td>
+      <td>${api.urls.map((url) => `<code>${escapeHtml(url)}</code>`).join("<br>") || "No reachable URL"}</td>
+      <td><span class="status-badge ${api.public && open ? "warning" : "neutral"}"><i></i>${escapeHtml(auth)}</span><small class="table-detail">${api.public ? "Public" : "Not public"}</small></td>
+      <td>${apiHealthCell(api.health)}</td>
+      <td>${api.routes.length} route${api.routes.length === 1 ? "" : "s"}${open && api.routes.length ? `, <strong>${open} unauthenticated</strong>` : ""}<small class="table-detail">${escapeHtml(api.routes.map((route) => `${route.route} (${route.auth ?? "app"})`).join(", "))}</small></td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="6">No APIs found in the enabled regions.</td></tr>`;
+  $("#api-inventory-wrap").hidden = false;
+  const counts = summary.findings;
+  $("#api-findings-meta").textContent = `${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low.${summary.leaks ? ` ${summary.leaks} data leak${summary.leaks === 1 ? "" : "s"} found.` : ""}${summary.probed_requests ? ` Probe sent ${summary.probed_requests} unauthenticated GET requests.` : " Configuration only; tick Probe endpoints to confirm with live requests and check for leaks."} Fixes are suggestions; nothing is changed automatically.`;
+  $("#api-findings-body").innerHTML = inventory.findings.map((finding) => `<tr>
+      <td><span class="severity-label ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span></td>
+      <td><strong>${escapeHtml(finding.api)}</strong><small class="table-detail">${escapeHtml(finding.source)} · ${escapeHtml(finding.region)}</small></td>
+      <td><strong>${escapeHtml(finding.target)}</strong>${finding.confirmed ? ` <span class="status-badge warning"><i></i>Confirmed by probe</span>` : ""}<small class="table-detail">${escapeHtml(finding.evidence)}</small></td>
+      <td>${escapeHtml(finding.owasp)}</td>
+      <td><span class="remediation-copy">${escapeHtml(finding.fix)}</span>${finding.command ? `<code class="table-detail">${escapeHtml(finding.command)}</code>` : ""}</td>
+    </tr>`).join("") || `<tr><td colspan="5">No risky settings found on public APIs.</td></tr>`;
+  $("#api-findings-card").hidden = false;
+  const failed = inventory.errors.map((error) => `${error.source} (${error.region}): ${error.error}`);
+  setMessage($("#api-inventory-message"), failed.length ? `${failed.length} source${failed.length === 1 ? "" : "s"} could not be read. ${failed.join(" · ")}` : "", failed.length > 0);
+}
+
+async function runApiInventory() {
+  if (!protectedOrAuth()) return;
+  const button = $("#run-api-inventory");
+  const probe = $("#api-inventory-probe").checked;
+  setBusy(button, true, probe ? "Crawling and probing…" : "Crawling…");
+  setMessage($("#api-inventory-message"), `Reading every enabled region${probe ? " and sending one unauthenticated GET per readable route" : ""}. No changes are being made.`);
+  try {
+    const inventory = await apiRequest(`/security-agent/api-inventory${probe ? "?probe=true" : ""}`);
+    renderApiInventory(inventory);
+    recordActivity("API inventory", `${inventory.summary.public} public APIs, ${inventory.summary.unauthenticated} unauthenticated`, inventory.summary.unauthenticated ? "warning" : "success");
+  } catch (error) {
+    setMessage($("#api-inventory-message"), error.message, true);
+    showToast(error.message, true);
+  } finally { setBusy(button, false); }
+}
+
+async function loadLatestApiInventory() {
+  if (!state.token || state.apiInventory) return;
+  try {
+    renderApiInventory(await apiRequest("/security-agent/api-inventory/latest"));
+  } catch (error) {
+    if (error.status !== 404) setMessage($("#api-inventory-message"), error.message, true);
+  }
+}
+
+function downloadFile(name, type, content) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  Object.assign(document.createElement("a"), { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadApiReport(format) {
+  if (!state.apiInventory) return;
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  if (format === "json") {
+    downloadFile(`centralwatch-api-report-${stamp}.json`, "application/json", JSON.stringify({ inventory: state.apiInventory, deep_test: state.apiDeepTest ?? null }, null, 2));
+    return;
+  }
+  // The tables are already rendered with escaped values, so the report reuses their markup.
+  const section = (title, selector) => {
+    const table = $(selector);
+    return table && !table.closest("[hidden]") ? `<h2>${title}</h2>${table.outerHTML}` : "";
+  };
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CentralWatch API exposure report</title>
+<style>body{font:13px/1.45 system-ui,sans-serif;margin:24px;color:#14171f;background:#fff}table{border-collapse:collapse;width:100%;margin-bottom:28px}th,td{border:1px solid #d5d9e0;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f2f4f7}small,code{display:block;color:#566070;font-size:11px;overflow-wrap:anywhere}.critical,.high{color:#b42318;font-weight:700;text-transform:uppercase}.medium{color:#a15c07;font-weight:700;text-transform:uppercase}.low{color:#566070;text-transform:uppercase}.status-badge i{display:none}</style></head>
+<body><h1>CentralWatch API exposure report</h1><p>${escapeHtml($("#api-inventory-meta").textContent)}</p><p>${escapeHtml($("#api-findings-meta").textContent)}</p>
+${section("Exposed API inventory", "#api-inventory-wrap table")}${section("Findings and fixes", "#api-findings-card table")}${state.apiDeepTest ? `<p>${escapeHtml($("#api-astf-meta").textContent)}</p>` : ""}${section("Deep test (OWASP ASTF)", "#api-astf-wrap table")}</body></html>`;
+  downloadFile(`centralwatch-api-report-${stamp}.html`, "text/html", html);
+}
+
+async function runApiDeepTest() {
+  if (!protectedOrAuth()) return;
+  const approved = window.confirm("Run OWASP ASTF against every allow-listed public API?\n\nIt sends attack traffic: request bursts, injection payloads and state-changing calls (POST/PUT/DELETE). Only run it against APIs you are authorized to test.");
+  if (!approved) return;
+  const button = $("#run-api-astf");
+  setBusy(button, true, "Testing…");
+  setMessage($("#api-astf-message"), "Running ASTF against the allow-listed APIs. This can take a few minutes.");
+  try {
+    const result = await apiRequest("/security-agent/api-astf", { method: "POST" });
+    renderApiDeepTest(result);
+    recordActivity("ASTF deep test", `${result.summary.apis} APIs, ${result.findings.length} issues`, result.findings.length ? "warning" : "success");
+  } catch (error) {
+    setMessage($("#api-astf-message"), error.message, true);
+    showToast(error.message, true);
+  } finally { setBusy(button, false); }
+}
+
+async function loadLatestApiDeepTest() {
+  if (!state.token || state.apiDeepTest) return;
+  try {
+    renderApiDeepTest(await apiRequest("/security-agent/api-astf/latest"));
+  } catch (error) {
+    if (error.status !== 404) setMessage($("#api-astf-message"), error.message, true);
+  }
+}
+
+function renderApiDeepTest(result) {
+    state.apiDeepTest = result;
+    const { summary } = result;
+    const counts = summary.findings;
+    $("#api-astf-meta").textContent = `Tested ${result.tested.join(", ") || "no APIs"} (${summary.runs} ASTF run${summary.runs === 1 ? "" : "s"}): ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low. ${new Date(result.generated_at).toLocaleString()}`;
+    $("#api-astf-body").innerHTML = result.findings.map((finding) => `<tr>
+      <td><span class="severity-label ${escapeHtml(finding.severity)}">${escapeHtml(finding.severity)}</span></td>
+      <td><strong>${escapeHtml(finding.api)}</strong><small class="table-detail">${escapeHtml(finding.source)} · ${escapeHtml(finding.region)}</small></td>
+      <td><strong>${escapeHtml(finding.target)}</strong><small class="table-detail">${escapeHtml(finding.evidence)}</small></td>
+      <td>${escapeHtml(finding.owasp)}</td>
+      <td><span class="remediation-copy">${escapeHtml(finding.fix)}</span></td>
+    </tr>`).join("") || `<tr><td colspan="5">ASTF reported no issues.</td></tr>`;
+    $("#api-astf-wrap").hidden = false;
+    const failed = result.scans.filter((scan) => scan.error).map((scan) => `${scan.api} (${scan.url}): ${scan.error}`);
+    const notes = [];
+    if (!summary.apis) notes.push(`No public API matches the allowlist (${result.allowlist}).`);
+    if (result.skipped.length) notes.push(`Not tested (not allow-listed): ${result.skipped.join(", ")}.`);
+    const ignored = result.scans.reduce((total, scan) => total + (scan.ignored_guessed_paths || 0), 0);
+    if (ignored) notes.push(`Ignored ${ignored} ASTF result${ignored === 1 ? "" : "s"} on guessed paths that are not real routes (a catch-all handler answered them).`);
+    if (failed.length) notes.push(`${failed.length} run${failed.length === 1 ? "" : "s"} failed: ${failed.join(" · ")}`);
+    setMessage($("#api-astf-message"), notes.join(" "), failed.length > 0);
+}
+
+// ---------------------------------------------------------------- API security dashboard (Overview)
+const API_SEVERITY_LEVELS = ["critical", "high", "medium", "low"];
+const API_SEVERITY_COLORS = { critical: "var(--danger)", high: "var(--coral)", medium: "var(--warning)", low: "var(--border-strong)" };
+const API_LEAK_LABELS = {
+  aws_access_key: "AWS key", private_key: "private key", card_number: "card number", access_token: "access token",
+  secret_value: "secret value", email: "email address", phone: "phone number", stack_trace: "stack trace",
+  internal_ip: "internal IP", settings_secret: "secret in settings",
+};
+
+function apisecEmpty(title, detail) {
+  return `<div class="empty-state compact"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
+}
+
+async function loadApiSecurityDashboard() {
+  const body = $("#apisec-body");
+  if (!body) return;
+  if (!state.token) {
+    body.innerHTML = apisecEmpty("Sign in to see the API security summary", "Use Sign in at the bottom left. The summary comes from the AWS security agent's scans.");
+    return;
+  }
+  let inventory;
+  try {
+    inventory = await apiRequest("/security-agent/api-inventory/latest");
+  } catch (error) {
+    body.innerHTML = error.status === 404
+      ? apisecEmpty("No scan yet", "The first automatic scan runs within a few minutes of the app starting, or click Crawl APIs on the AWS security agent page.")
+      : apisecEmpty("Could not load the latest scan", error.message);
+    return;
+  }
+  const baseline = await apiRequest("/security-agent/latest").catch(() => null); // 404 until a baseline scan has run
+  renderApiSecurityDashboard(inventory, baseline);
+}
+
+function renderApiSecurityDashboard(inventory, baseline) {
+  const { summary, findings, apis } = inventory;
+  const counts = summary.findings;
+  const health = summary.health || { up: 0, errors: 0, down: 0 };
+  const probed = health.up + health.errors + health.down;
+  const leaks = findings.filter((f) => f.check === "response_leak" || f.check === "settings_secret");
+  const leakKinds = [...new Set(leaks.map((f) => API_LEAK_LABELS[f.kind || f.check] || (f.kind || f.check).replaceAll("_", " ")))];
+  const publicApis = apis.filter((api) => api.public);
+  $("#apisec-meta").textContent = `From the AWS security agent's last scan, ${new Date(inventory.generated_at).toLocaleString()}. ${apiScanTrigger(inventory.trigger)}`;
+
+  const kpi = (label, value, note, tone = "") =>
+    `<div class="apisec-kpi ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`;
+  const kpis = [
+    kpi("Public APIs", summary.public, `${summary.total} in ${summary.regions} regions`),
+    kpi("Without sign-in", summary.unauthenticated, summary.unauthenticated ? "anyone can call them" : "every public API needs sign-in", summary.unauthenticated ? "bad" : "good"),
+    kpi("Critical findings", counts.critical, `${counts.high} high · ${counts.medium} medium · ${counts.low} low`, counts.critical ? "bad" : "good"),
+    kpi("Data leaks", leaks.length, leakKinds.join(", ") || "none found", leaks.length ? "bad" : "good"),
+    probed
+      ? kpi("Answering", `${health.up}/${probed}`, health.up === probed ? "all probed APIs are up" : `${probed - health.up} down or failing`, health.up === probed ? "good" : "bad")
+      : kpi("Answering", "–", "not probed yet"),
+    baseline
+      ? kpi("AWS baseline", `${baseline.summary.passed}/${baseline.summary.total}`, "controls passed", baseline.summary.passed === baseline.summary.total ? "good" : "warn")
+      : kpi("AWS baseline", "–", "run it on the AWS security agent page"),
+  ].join("");
+
+  const total = API_SEVERITY_LEVELS.reduce((sum, level) => sum + counts[level], 0);
+  const share = (level) => (total ? (counts[level] / total) * 100 : 0);
+  const ring = `<div class="apisec-panel"><h3>Findings by risk level</h3><div class="apisec-donut-wrap">
+      <div class="apisec-donut" role="img" data-total="${total}" style="--c:${share("critical")};--h:${share("high")};--m:${share("medium")}"
+        aria-label="${total} findings: ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low"></div>
+      <ul class="apisec-legend">${API_SEVERITY_LEVELS.map((level) =>
+        `<li style="--sev:${API_SEVERITY_COLORS[level]}"><b></b>${level[0].toUpperCase()}${level.slice(1)}<em>${counts[level]}</em></li>`).join("")}</ul>
+    </div></div>`;
+
+  const byOwasp = {};
+  findings.forEach((f) => {
+    const [code, ...name] = f.owasp.split(" ");
+    const label = `${code.split(":")[0]} ${name.join(" ")}`;
+    byOwasp[label] = (byOwasp[label] || 0) + 1;
+  });
+  const owaspRows = Object.entries(byOwasp).sort((a, b) => b[1] - a[1]);
+  const maxOwasp = Math.max(1, ...owaspRows.map(([, n]) => n));
+  const owasp = `<div class="apisec-panel"><h3>Findings by OWASP API Top 10 category</h3><div class="apisec-bars">${owaspRows.map(([label, n]) =>
+    `<div class="apisec-bar"><span title="${escapeHtml(label)}">${escapeHtml(label)}</span><em>${n}</em><b><i style="--w:${(n / maxOwasp) * 100}%"></i></b></div>`).join("") || "<span>No findings.</span>"}</div></div>`;
+
+  const maxMs = Math.max(1, ...publicApis.map((api) => api.health?.avg_ms || 0));
+  const healthRows = publicApis.map((api) => {
+    const h = api.health;
+    if (!h || h.status === "not checked") {
+      return `<div class="apisec-bar"><span><i class="apisec-dot" style="--dot:var(--border-strong)"></i>${escapeHtml(api.name)}</span><em>not probed</em></div>`;
+    }
+    const up = h.status === "up";
+    return `<div class="apisec-bar"><span title="${escapeHtml(`${api.source} · ${api.region}`)}"><i class="apisec-dot" style="--dot:${up ? "var(--success)" : "var(--danger)"}"></i>${escapeHtml(api.name)}</span>
+      <em>${escapeHtml(h.avg_ms != null ? `${h.avg_ms} ms` : up ? "up" : h.status)}</em>
+      <b><i style="--w:${((h.avg_ms || 0) / maxMs) * 100}%;--bar:${up ? "var(--accent)" : "var(--danger)"}"></i></b></div>`;
+  }).join("");
+  const healthPanel = `<div class="apisec-panel"><h3>Health and response time</h3><div class="apisec-bars">${healthRows || "<span>No public APIs.</span>"}</div></div>`;
+
+  state.apisecCommands = [];
+  const urgent = findings.filter((f) => f.severity === "critical" || f.severity === "high").slice(0, 5);
+  const fixes = urgent.map((f) => {
+    const index = f.command ? state.apisecCommands.push(f.command) - 1 : -1;
+    return `<div class="apisec-fix" style="--sev:${API_SEVERITY_COLORS[f.severity]}">
+      <div><span class="severity-label ${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</span> <strong>${escapeHtml(f.api)} · ${escapeHtml(f.target)}</strong>${f.confirmed ? ` <span class="status-badge warning"><i></i>Confirmed by probe</span>` : ""}
+        <p>${escapeHtml(f.evidence)}</p><span class="remediation-copy"><b>Fix:</b> ${escapeHtml(f.fix)}</span>${f.command ? `<code>${escapeHtml(f.command)}</code>` : ""}</div>
+      ${index >= 0 ? `<button class="button ghost compact" type="button" data-apisec-copy="${index}">Copy fix command</button>` : "<span></span>"}
+    </div>`;
+  }).join("");
+  const fixTitle = urgent.length < findings.length
+    ? `Fix these first (${urgent.length} of ${findings.length}; the rest are on the AWS security agent page)` : "Fix these first";
+
+  const apiRows = publicApis.map((api) => {
+    const mine = findings.filter((f) => f.api === api.name && f.region === api.region && f.source === api.source);
+    const open = mine.some((f) => f.check === "route_no_auth" || f.check === "url_no_auth");
+    const worst = API_SEVERITY_LEVELS.find((level) => mine.some((f) => f.severity === level));
+    return `<div class="apisec-api"><strong title="${escapeHtml(api.name)}">${escapeHtml(api.name)}</strong>
+      <span class="status-badge ${open ? "error" : "success"}"><i></i>${open ? "Open to anyone" : "Sign-in required"}</span>
+      <small>${escapeHtml(api.source)} · ${escapeHtml(api.region)} · ${mine.length} finding${mine.length === 1 ? "" : "s"}${worst ? `, worst ${worst}` : ""}</small></div>`;
+  }).join("");
+
+  $("#apisec-body").innerHTML = `
+    <div class="apisec-kpis">${kpis}</div>
+    <div class="apisec-grid">${ring}${owasp}${healthPanel}</div>
+    <div class="apisec-grid wide-left">
+      <div class="apisec-panel"><h3>${escapeHtml(fixTitle)}</h3><div class="apisec-fixes">${fixes || apisecEmpty("Nothing critical or high", "No urgent fixes right now.")}</div></div>
+      <div class="apisec-panel"><h3>Exposed APIs</h3><div class="apisec-apis">${apiRows || "<span>No public APIs found.</span>"}</div></div>
+    </div>`;
+}
+
 async function handleSecurityScan(event) {
   event.preventDefault();
   if (!state.token) { openAuthDialog(); return; }
@@ -1657,7 +1937,7 @@ function renderAlertsList() {
           ${relevantLabels.map(([k, v]) => `<span><code>${escapeHtml(k)}</code>: <strong>${escapeHtml(v)}</strong></span>`).join("")}
         </div>
         <div class="alert-actions">
-          <a class="button secondary compact" href="http://localhost:9093/#/alerts?filter=${encodeURIComponent(`alertname="${name}"`)}" target="_blank" rel="noopener">
+          <a class="button secondary compact" href="${externalUrl("9093", `/#/alerts?filter=${encodeURIComponent(`alertname="${name}"`)}`)}" target="_blank" rel="noopener">
             View in Alertmanager ↗
           </a>
           <a class="button ghost compact" href="#obs-traces">
@@ -1751,10 +2031,10 @@ function renderAlertTimeline() {
 }
 
 function loadViewData(name) {
-  if (name === "overview") { loadHealth(); loadServices(); loadAlerts(); }
+  if (name === "overview") { loadHealth(); loadServices(); loadAlerts(); loadApiSecurityDashboard(); }
   if (name === "alerts") loadAlerts();
   if (name === "proxy") loadProxyWorkspace();
-  if (name === "aws-security" && state.token) loadLatestAwsSecurityScan();
+  if (name === "aws-security" && state.token) { loadLatestAwsSecurityScan(); loadLatestApiInventory(); loadLatestApiDeepTest(); }
   if (name === "observability" || name.startsWith("obs-")) loadObsFrame(name);
   if (name === "chat") loadGeminiStatus();
   if (name === "orders" && state.token) loadOrders();
@@ -1824,6 +2104,13 @@ function bindEvents() {
   on("#run-aws-security-scan", "click", runAwsSecurityScan);
   on("#select-agent-findings", "click", toggleAwsFindingSelection);
   on("#apply-agent-findings", "click", applyAwsSecurityFindings);
+  on("#run-api-inventory", "click", runApiInventory);
+  on("#apisec-body", "click", (event) => {
+    const button = event.target.closest("[data-apisec-copy]");
+    if (button) copyText(state.apisecCommands[Number(button.dataset.apisecCopy)], "Fix command copied");
+  });
+  on("#run-api-astf", "click", runApiDeepTest);
+  $$("[data-api-report]").forEach((button) => button.addEventListener("click", () => downloadApiReport(button.dataset.apiReport)));
   on("#aws-findings-body", "change", (event) => { if (event.target.matches(".finding-checkbox")) updateAwsAgentSelection(); });
   on("#refresh-orders", "click", () => protectedOrAuth() && loadOrders());
   on("#new-order", "click", openOrderDialog);
@@ -1873,5 +2160,6 @@ updateAuthUI();
 routeFromHash();
 restoreSession();
 window.setInterval(() => { if (state.activeView === "overview") loadHealth(); }, 30000);
+window.setInterval(() => { if (state.activeView === "overview") loadApiSecurityDashboard(); }, 60000);
 window.setInterval(() => { if (state.activeView === "proxy") loadProxyObservability(); }, 15000);
 window.setInterval(() => { if (state.activeView === "alerts" || state.activeView === "overview") loadAlerts(); }, 15000);

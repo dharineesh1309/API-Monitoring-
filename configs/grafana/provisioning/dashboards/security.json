@@ -157,7 +157,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "APIs in the AWS account at the last scan (manual, startup, or after a CloudTrail change).",
+      "description": "APIs in the AWS account at the last scan (manual, startup, or the 5-minute schedule).",
       "fieldConfig": {
         "defaults": { "color": { "fixedColor": "blue", "mode": "fixed" }, "decimals": 0, "mappings": [], "unit": "none" },
         "overrides": [
@@ -208,15 +208,84 @@
     },
     {
       "datasource": { "type": "loki", "uid": "loki" },
-      "description": "CloudTrail events that triggered a rescan, and APIs that newly lost authentication.",
+      "description": "What the scheduled scan found changed: APIs that newly lost authentication, new data leaks, APIs going down or answering again, and deep test results.",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
       "id": 7,
       "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
       "targets": [
         { "datasource": { "type": "loki", "uid": "loki" }, "editorMode": "code", "expr": "{job=\"centralwatch-demo-app\"} |= `API exposure` | json message=\"body\" | line_format `{{.message}}`", "queryType": "range", "refId": "A" }
       ],
-      "title": "API Exposure Events (CloudTrail Rescans, Newly Exposed APIs)",
+      "title": "API Exposure Events (New Exposures, Leaks, Outages)",
       "type": "logs"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Whether each exposed API answered CentralWatch's last probe (every 5 minutes). DOWN = no answer, or only server errors.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" }, "decimals": 0, "noValue": "Not probed yet", "unit": "none",
+          "mappings": [{ "type": "value", "options": { "0": { "text": "DOWN", "color": "red", "index": 0 }, "1": { "text": "UP", "color": "green", "index": 1 } } }],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 34 },
+      "id": 8,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (api) (centralwatch_api_exposure_up)", "legendFormat": "{{api}}", "refId": "A" }
+      ],
+      "title": "Exposed API Health",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Average response time of each exposed API's probed routes, measured by CentralWatch from outside.",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "custom": { "lineWidth": 2, "fillOpacity": 10, "showPoints": "always", "pointSize": 4 }, "noValue": "Not probed yet", "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 34 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (api) (centralwatch_api_exposure_response_time_milliseconds)", "legendFormat": "{{api}}", "refId": "A" }
+      ],
+      "title": "Exposed API Response Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Leaks found at the last probed scan: secrets, personal data, stack traces or internal addresses in unauthenticated responses, secrets in API settings, and version headers.",
+      "fieldConfig": {
+        "defaults": { "color": { "fixedColor": "orange", "mode": "fixed" }, "decimals": 0, "min": 0, "noValue": "No leaks found", "unit": "none", "mappings": [] },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 34 },
+      "id": 10,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (kind) (centralwatch_api_exposure_leaks) > 0", "legendFormat": "{{kind}}", "refId": "A" }
+      ],
+      "title": "Data Leaks by Type",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Findings of the last OWASP ASTF deep test of the allow-listed APIs (scheduled daily, or run from the CentralWatch site).",
+      "fieldConfig": {
+        "defaults": { "color": { "fixedColor": "text", "mode": "fixed" }, "decimals": 0, "min": 0, "noValue": "No deep test yet", "unit": "none", "mappings": [] },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "critical" }, "properties": [{ "id": "color", "value": { "fixedColor": "dark-red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "high" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "medium" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 34 },
+      "id": 11,
+      "options": { "displayMode": "basic", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "prometheus" }, "expr": "max by (severity) (centralwatch_api_exposure_deep_test_findings)", "legendFormat": "{{severity}}", "refId": "A" }
+      ],
+      "title": "Deep Test Findings (Last Run)",
+      "type": "bargauge"
     }
   ],
   "refresh": "5s",
@@ -237,5 +306,5 @@
   "timezone": "",
   "title": "Security & Threat Intelligence",
   "uid": "security",
-  "version": 2
+  "version": 3
 }

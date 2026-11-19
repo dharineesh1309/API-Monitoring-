@@ -187,6 +187,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./configs/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-storage:/prometheus
     ports:
       - "9091:9090"

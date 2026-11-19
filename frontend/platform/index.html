@@ -69,6 +69,10 @@
             <article class="summary-card" style="cursor:pointer;" onclick="location.hash='#alerts'"><span>Active Alerts</span><strong id="overview-alert-count" style="color:var(--danger);">-</strong><small id="overview-alert-summary">Alertmanager :9093</small></article>
             <article class="summary-card"><span>Last checked</span><strong id="last-check">-</strong><small>Automatic every 30 seconds</small></article>
           </div>
+          <article class="card apisec-card" aria-labelledby="apisec-title">
+            <div class="card-header stack-mobile"><div><h2 id="apisec-title">API security</h2><p id="apisec-meta">Exposed APIs in your AWS account, what is wrong with them, and how to fix it.</p></div><a class="button secondary compact" href="#aws-security">Open full inventory</a></div>
+            <div id="apisec-body"><div class="loading-state"><i></i>Loading the latest scan…</div></div>
+          </article>
           <div class="layout-grid overview-grid">
             <article class="card span-2">
               <div class="card-header"><div><h2>Connected services</h2><p>Live checks through the frontend gateway.</p></div></div>
@@ -224,6 +228,20 @@
                 <p class="form-message" id="aws-agent-message" role="status"></p>
               </article>
             </div>
+            <article class="card agent-findings-card">
+              <div class="card-header stack-mobile"><div><h2>Exposed API inventory</h2><p id="api-inventory-meta">Finds every API in the account: API Gateway, Lambda function URLs, AppSync, CloudFront, load balancers and public EC2, in every enabled region, and flags risky settings and secrets in their settings. With Probe endpoints it also checks each API's health and what its responses leak. Runs on its own every 5 minutes.</p></div><div class="button-row"><label class="probe-option"><input class="finding-checkbox" id="api-inventory-probe" type="checkbox">Probe endpoints (one GET per route, no credentials)</label><button class="button ghost compact" type="button" data-api-report="html" disabled>Download report</button><button class="button ghost compact" type="button" data-api-report="json" disabled>JSON</button><button class="button primary compact" id="run-api-inventory" type="button">Crawl APIs</button></div></div>
+              <div class="table-wrap" id="api-inventory-wrap" hidden><table><thead><tr><th>Type</th><th>API</th><th>Endpoints</th><th>Authentication</th><th>Health</th><th>Routes</th></tr></thead><tbody id="api-inventory-body"></tbody></table></div>
+              <p class="form-message" id="api-inventory-message" role="status"></p>
+            </article>
+            <article class="card agent-findings-card" id="api-findings-card" hidden>
+              <div class="card-header stack-mobile"><div><h2>API findings and fixes</h2><p id="api-findings-meta"></p></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Risk level</th><th>API</th><th>Finding</th><th>OWASP API Top 10</th><th>Recommended fix</th></tr></thead><tbody id="api-findings-body"></tbody></table></div>
+            </article>
+            <article class="card agent-findings-card">
+              <div class="card-header stack-mobile"><div><h2>Deep test (OWASP ASTF)</h2><p id="api-astf-meta">Runs the OWASP API Security Testing Framework against each public API whose name matches the server allowlist (API_SCAN_ALLOWLIST, default cw-lab-*), using the API's real routes. ASTF sends attack traffic, including request bursts and state-changing calls.</p></div><div class="button-row"><button class="button primary compact" id="run-api-astf" type="button">Run deep test</button></div></div>
+              <div class="table-wrap" id="api-astf-wrap" hidden><table><thead><tr><th>Risk level</th><th>API</th><th>Endpoint and issue</th><th>OWASP API Top 10</th><th>Recommended fix</th></tr></thead><tbody id="api-astf-body"></tbody></table></div>
+              <p class="form-message" id="api-astf-message" role="status"></p>
+            </article>
           </div>
         </section>
 
@@ -301,7 +319,7 @@
 
         <!-- System Overview -->
         <section class="view" data-view="observability" aria-labelledby="obs-overview-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-overview-title">System Overview</h1><p>Comprehensive system health, latency percentiles, throughput, and cross-service telemetry.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-overview" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-overview/centralwatch-e28094-overview" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-overview-title">System Overview</h1><p>Comprehensive system health, latency percentiles, throughput, and cross-service telemetry.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-overview" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-overview/centralwatch-e28094-overview" href="http://127.0.0.1:3000/d/centralwatch-overview/centralwatch-e28094-overview" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-overview" class="obs-frame" data-src="/d/centralwatch-overview/centralwatch-e28094-overview" title="System Overview" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -309,7 +327,7 @@
 
         <!-- SLO & Golden Signals -->
         <section class="view" data-view="obs-slo" aria-labelledby="obs-slo-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-slo-title">SLO & Error Budget</h1><p>Error budget burn rate, golden signals, availability targets, and SLO compliance.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-slo" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-slo" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-slo-title">SLO & Error Budget</h1><p>Error budget burn rate, golden signals, availability targets, and SLO compliance.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-slo" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-slo" href="http://127.0.0.1:3000/d/centralwatch-slo" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-slo" class="obs-frame" data-src="/d/centralwatch-slo" title="SLO & Golden Signals" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -317,7 +335,7 @@
 
         <!-- API Monitoring -->
         <section class="view" data-view="obs-api" aria-labelledby="obs-api-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-api-title">API Monitoring</h1><p>HTTP request rate, response time percentiles (p50, p95, p99), error rates, and route breakdown.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-api" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-api-monitoring/centralwatch-e28094-api-monitoring" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-api-title">API Monitoring</h1><p>HTTP request rate, response time percentiles (p50, p95, p99), error rates, and route breakdown.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-api" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-api-monitoring/centralwatch-e28094-api-monitoring" href="http://127.0.0.1:3000/d/centralwatch-api-monitoring/centralwatch-e28094-api-monitoring" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-api" class="obs-frame" data-src="/d/centralwatch-api-monitoring/centralwatch-e28094-api-monitoring" title="API Monitoring" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -325,7 +343,7 @@
 
         <!-- AWS Services -->
         <section class="view" data-view="obs-aws" aria-labelledby="obs-aws-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-aws-title">AWS Services</h1><p>DynamoDB, S3, SQS, SNS, and Lambda telemetry with service-level trace correlation.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-aws" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-aws-services/centralwatch-e28094-aws-services" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-aws-title">AWS Services</h1><p>DynamoDB, S3, SQS, SNS, and Lambda telemetry with service-level trace correlation.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-aws" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-aws-services/centralwatch-e28094-aws-services" href="http://127.0.0.1:3000/d/centralwatch-aws-services/centralwatch-e28094-aws-services" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-aws" class="obs-frame" data-src="/d/centralwatch-aws-services/centralwatch-e28094-aws-services" title="AWS Services" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -333,7 +351,7 @@
 
         <!-- Business Metrics -->
         <section class="view" data-view="obs-business" aria-labelledby="obs-business-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-business-title">Business Metrics</h1><p>Order volumes, user registrations, revenue metrics, and transaction health.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-business" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-business-metrics/centralwatch-e28094-business-metrics" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-business-title">Business Metrics</h1><p>Order volumes, user registrations, revenue metrics, and transaction health.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-business" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-business-metrics/centralwatch-e28094-business-metrics" href="http://127.0.0.1:3000/d/centralwatch-business-metrics/centralwatch-e28094-business-metrics" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-business" class="obs-frame" data-src="/d/centralwatch-business-metrics/centralwatch-e28094-business-metrics" title="Business Metrics" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -341,7 +359,7 @@
 
         <!-- Application Logs -->
         <section class="view" data-view="obs-logs" aria-labelledby="obs-logs-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-logs-title">Application Logs</h1><p>Centralized Loki log aggregation with TraceID correlation and log volume analytics.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-logs" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-logs/centralwatch-e28094-logs" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-logs-title">Application Logs</h1><p>Centralized Loki log aggregation with TraceID correlation and log volume analytics.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-logs" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-logs/centralwatch-e28094-logs" href="http://127.0.0.1:3000/d/centralwatch-logs/centralwatch-e28094-logs" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-logs" class="obs-frame" data-src="/d/centralwatch-logs/centralwatch-e28094-logs" title="Application Logs" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>
@@ -349,7 +367,7 @@
 
         <!-- Distributed Tracing -->
         <section class="view" data-view="obs-traces" aria-labelledby="obs-traces-title" hidden>
-          <div class="page-heading"><div><h1 id="obs-traces-title">Distributed Tracing</h1><p>End-to-end Tempo trace waterfalls, span hierarchies, and downstream microservice propagation.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-traces" type="button">Reload</button><a class="button secondary compact" href="http://localhost:3000/d/centralwatch-tracing/centralwatch-e28094-tracing" target="_blank" rel="noopener">Full screen ↗</a></div></div>
+          <div class="page-heading"><div><h1 id="obs-traces-title">Distributed Tracing</h1><p>End-to-end Tempo trace waterfalls, span hierarchies, and downstream microservice propagation.</p></div><div class="button-row"><button class="button ghost compact reload-frame" data-frame-target="frame-traces" type="button">Reload</button><a class="button secondary compact external-link" data-port="3000" data-path="/d/centralwatch-tracing/centralwatch-e28094-tracing" href="http://127.0.0.1:3000/d/centralwatch-tracing/centralwatch-e28094-tracing" target="_blank" rel="noopener">Full screen ↗</a></div></div>
           <article class="card grafana-card">
             <div class="embed-frame-shell"><iframe id="frame-traces" class="obs-frame" data-src="/d/centralwatch-tracing/centralwatch-e28094-tracing" title="Distributed Tracing" loading="lazy" allow="fullscreen" referrerpolicy="no-referrer"></iframe></div>
           </article>

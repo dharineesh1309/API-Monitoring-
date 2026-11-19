@@ -101,13 +101,16 @@
       </form>
 
       <div class="login-footer">
-        Client Applications: <a href="http://localhost:8090" target="_blank" rel="noopener">Demo Business Application (:8090) ↗</a>
+        Client Applications: <a id="demo-app-link" href="http://127.0.0.1:8090" target="_blank" rel="noopener">Demo Business Application (:8090) ↗</a>
       </div>
     </div>
   </div>
 
   <script>
     const TOKEN_KEY = "cw-token";
+    // Same host the page was opened on (localhost can be hijacked by WSL's relay on Windows, so prefer 127.0.0.1).
+    document.getElementById("demo-app-link").href =
+      `http://${location.hostname === "localhost" ? "127.0.0.1" : location.hostname}:8090`;
 
     function setMessage(el, text, isError = false) {
       if (!el) return;

@@ -118,8 +118,10 @@ services:
       - ASTF_SCAN_TIMEOUT_SECONDS=1800
       # AWS APIs (name patterns) the deep test may send attack traffic to. Only list APIs you may test.
       - API_SCAN_ALLOWLIST=${API_SCAN_ALLOWLIST:-cw-lab-*}
-      # Check CloudTrail for API changes and rescan every N seconds (0 turns it off).
+      # Rescan and probe every exposed API (settings, health, leaks) every N seconds (0 turns it off).
       - API_RESCAN_INTERVAL_SECONDS=${API_RESCAN_INTERVAL_SECONDS:-300}
+      # Run the ASTF deep test on the allow-listed APIs every N seconds (0 turns it off).
+      - API_DEEP_TEST_INTERVAL_SECONDS=${API_DEEP_TEST_INTERVAL_SECONDS:-86400}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status == 200 else 1)\""]
       interval: 15s
@@ -142,6 +144,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./configs/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-storage:/prometheus
     ports:
       - "9090:9090"

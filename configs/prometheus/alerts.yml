@@ -90,3 +90,31 @@ groups:
         annotations:
           summary: "Elevated rate limit rejections"
           description: "High rate of 429 rejections on API proxy."
+
+      # Exposed AWS APIs, from CentralWatch's own scheduled scan and probe (every 5 minutes).
+      - alert: ExposedApiDown
+        expr: min by (api, source, region) (centralwatch_api_exposure_up) == 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Exposed API {{ $labels.api }} is down or failing"
+          description: "{{ $labels.source }} {{ $labels.api }} in {{ $labels.region }} did not answer the last probe, or answered only with server errors."
+
+      - alert: ExposedApiSecretLeak
+        expr: sum by (kind) (centralwatch_api_exposure_leaks{severity="critical"}) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "An exposed API leaks {{ $labels.kind }}"
+          description: "An unauthenticated response from an exposed API contains a secret or card number. Rotate it and remove it from the response."
+
+      - alert: ExposedApiDataLeak
+        expr: sum by (kind) (centralwatch_api_exposure_leaks{severity="high"}) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "An exposed API leaks {{ $labels.kind }}"
+          description: "Personal data, a token or a secret setting is exposed on an API reachable from the internet. See the AWS security agent page for the route and fix."

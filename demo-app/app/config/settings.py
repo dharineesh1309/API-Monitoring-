@@ -112,8 +112,16 @@ class Settings(BaseSettings):
     astf_scan_timeout_seconds: int = 1800
     # Comma-separated name patterns of AWS APIs the deep test may send attack traffic to.
     api_scan_allowlist: str = "cw-lab-*"
-    # How often to check CloudTrail for API changes and rescan (real AWS only; 0 turns it off).
+    # How often to rescan and probe every exposed API: settings, health, leaks (real AWS only; 0 turns it off).
     api_rescan_interval_seconds: int = 300
+    # How often to run the ASTF deep test on the allow-listed APIs (real AWS only; 0 turns it off).
+    api_deep_test_interval_seconds: int = 86400
+    # A scan reports whatever has not answered within this many seconds as timed out (keeps it under nginx's 2 minutes).
+    api_scan_time_budget_seconds: int = 60
+
+    # --- Self-healing -----------------------------------------------------------
+    # Check every N seconds that DNS lookups still return; restart the app if one hangs (0 turns it off).
+    dns_watchdog_interval_seconds: int = 60
 
 
 @lru_cache
