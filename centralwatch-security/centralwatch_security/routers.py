@@ -1073,10 +1073,19 @@ async def proxy_usage_history(
 
 
 @proxy_router.get("/metrics")
-async def proxy_usage_metrics():
+async def proxy_usage_metrics(request: Request):
     """Aggregate proxy request history and cost tracking for the control plane."""
     with _proxy_state_lock:
         records = list(PROXY_USAGE_HISTORY)
+
+    store = getattr(request.app.state, "centralwatch_proxy_store", None)
+    budgets: dict[str, float] = {}
+    if store:
+        try:
+            services_list = await store.list_services()
+            budgets = {s["service_name"]: float(s.get("monthly_budget_usd", 100.0)) for s in services_list}
+        except Exception:
+            pass
 
     total = len(records)
     successful = sum(item["status_code"] < 400 for item in records)
@@ -1125,6 +1134,7 @@ async def proxy_usage_metrics():
             **values,
             "average_latency_ms": round(duration_total / count, 2) if count else 0.0,
             "cost_usd": round(values["cost_usd"], 4),
+            "monthly_budget_usd": budgets.get(service_name, 100.0),
         })
 
     return {
@@ -1401,14 +1411,25 @@ async def api_proxy(
     else:
         _circuit_breaker.record_success(service_name)
 
-    # 9. Cost / Token Usage Tracking for LLM calls
+    # 9. Cost / Token Usage Tracking for LLM calls (Gemini, Claude, OpenAI)
     tokens_used = 0
     estimated_cost = 0.0
     if "json" in proxy_response.headers.get("content-type", ""):
         try:
             res_data = proxy_response.json()
-            usage = res_data.get("usageMetadata", {})
+            # 1. Google Gemini format: usageMetadata
+            usage = res_data.get("usageMetadata") or {}
             tokens_used = usage.get("totalTokenCount", 0)
+            
+            # 2. OpenAI / Claude format: usage
+            if not tokens_used:
+                openai_usage = res_data.get("usage") or {}
+                tokens_used = openai_usage.get("total_tokens", 0)
+                if not tokens_used:
+                    prompt_tok = openai_usage.get("prompt_tokens", 0) or openai_usage.get("input_tokens", 0)
+                    completion_tok = openai_usage.get("completion_tokens", 0) or openai_usage.get("output_tokens", 0)
+                    tokens_used = prompt_tok + completion_tok
+
             if tokens_used:
                 _rate_limiter.record_tokens(f"{service_name}:{token_hint}", tokens_used)
                 estimated_cost = round((tokens_used / 1000) * 0.00035, 6)
