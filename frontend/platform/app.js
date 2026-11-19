@@ -509,7 +509,7 @@ function renderServices() {
   const query = $("#proxy-search").value.trim().toLowerCase();
   const services = state.services.filter((service) => [service.service_name, service.base_url, ...service.allowed_ips].join(" ").toLowerCase().includes(query));
   if (!services.length) {
-    $("#service-table-body").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>${state.services.length ? "No matching services" : "No services configured"}</strong><span>${state.services.length ? "Try a different search." : "Add the first upstream service using the form."}</span></div></td></tr>`;
+    $("#service-table-body").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>${state.services.length ? "No matching services" : "No services configured"}</strong><span>${state.services.length ? "Try a different search." : "Add the first upstream service using the form."}</span></div></td></tr>`;
     return;
   }
   $("#service-table-body").innerHTML = services.map((service) => `
@@ -525,6 +525,7 @@ function renderServices() {
         </div>
       </td>
       <td><code>${escapeHtml(service.api_key)}</code><small class="table-detail">${escapeHtml(service.auth_type || "bearer")}</small></td>
+      <td><strong>$${Number(service.monthly_budget_usd || 100).toFixed(2)}</strong><small class="table-detail">/ month</small></td>
       <td>
         <div class="row-actions">
           <button class="table-button" type="button" data-copy-proxy="${escapeHtml(service.service_name)}">Copy endpoint</button>
@@ -545,6 +546,7 @@ async function handleProxySubmit(event) {
     role_name: data.get("role_name"),
     auth_type: data.get("auth_type"),
     timeout_seconds: Number(data.get("timeout_seconds")),
+    monthly_budget_usd: parseFloat(data.get("monthly_budget_usd") || "100.0"),
   };
   const button = $("#submit-proxy");
   const message = $("#proxy-form-message");
@@ -722,7 +724,28 @@ function renderProxyMetrics(metrics) {
   $("#proxy-bytes-out").textContent = formatBytes(metrics.bytes_out);
   $("#proxy-unique-ips").textContent = metrics.unique_client_ips;
   $("#proxy-token-count").textContent = metrics.authenticated_proxy_tokens;
-  $("#proxy-service-metrics-body").innerHTML = metrics.by_service.length ? metrics.by_service.map((service) => `<tr><td><strong>${escapeHtml(service.service_name)}</strong></td><td>${service.requests}</td><td>${service.successful}</td><td>${service.blocked}</td><td>${service.errors}</td><td>${Number(service.average_latency_ms).toFixed(1)} ms</td></tr>`).join("") : `<tr><td colspan="6"><div class="empty-state compact"><strong>No proxy traffic</strong><span>Metrics appear after the first request.</span></div></td></tr>`;
+  
+  const totalTokensEl = $("#proxy-total-tokens");
+  if (totalTokensEl) totalTokensEl.textContent = Number(metrics.total_tokens_tracked || 0).toLocaleString();
+  const totalCostEl = $("#proxy-total-cost");
+  if (totalCostEl) totalCostEl.textContent = `$${Number(metrics.total_estimated_cost_usd || 0).toFixed(4)}`;
+
+  $("#proxy-service-metrics-body").innerHTML = metrics.by_service.length ? metrics.by_service.map((service) => {
+    const tokens = Number(service.tokens_used || 0);
+    const cost = Number(service.cost_usd || 0);
+    const budget = Number(service.monthly_budget_usd || 100.0);
+    const percent = budget > 0 ? ((cost / budget) * 100).toFixed(1) : "0.0";
+    return `<tr>
+      <td><strong>${escapeHtml(service.service_name)}</strong></td>
+      <td>${service.requests}</td>
+      <td>${service.successful}</td>
+      <td>${service.blocked}</td>
+      <td>${service.errors}</td>
+      <td>${Number(service.average_latency_ms).toFixed(1)} ms</td>
+      <td><span class="status-badge ${tokens > 0 ? "info" : "neutral"}">${tokens > 0 ? `${tokens.toLocaleString()} tok` : "—"}</span></td>
+      <td><strong>$${cost.toFixed(4)}</strong> <small style="color:var(--muted)">/ $${budget.toFixed(2)} (${percent}%)</small></td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="8"><div class="empty-state compact"><strong>No proxy traffic</strong><span>Metrics appear after the first request.</span></div></td></tr>`;
 }
 
 function proxyOutcomeType(item) {
@@ -741,8 +764,13 @@ function renderProxyHistory() {
   $("#proxy-history-body").innerHTML = records.length ? records.map((item) => {
     const type = proxyOutcomeType(item);
     const identity = item.role_name ? `${item.role_name} / ${item.token_hint || "token unavailable"}` : "No matching service";
-    return `<tr><td>${escapeHtml(formatDate(item.timestamp))}</td><td><strong>${escapeHtml(item.service_name)}</strong></td><td><code>${escapeHtml(item.method)} ${escapeHtml(item.path)}</code></td><td><code>${escapeHtml(item.client_ip)}</code></td><td>${escapeHtml(identity)}</td><td><span class="status-badge ${type === "success" ? "success" : type === "blocked" ? "warning" : "error"}">${escapeHtml(item.outcome.replaceAll("_", " "))}</span></td><td>${item.status_code}</td><td>${Number(item.duration_ms).toFixed(1)} ms</td><td>${escapeHtml(formatBytes(item.bytes_in))} / ${escapeHtml(formatBytes(item.bytes_out))}</td></tr>`;
-  }).join("") : `<tr><td colspan="9"><div class="empty-state"><strong>${state.proxyHistory.length ? "No matching usage" : "No usage recorded"}</strong><span>${state.proxyHistory.length ? "Change the history filters." : "Proxy requests will appear here."}</span></div></td></tr>`;
+    const tokens = Number(item.tokens_used || 0);
+    const cost = Number(item.estimated_cost_usd || 0);
+    const tokenDisplay = tokens > 0 
+      ? `<span class="status-badge info" title="Cost: $${cost.toFixed(6)}">${tokens.toLocaleString()} tok ($${cost.toFixed(4)})</span>`
+      : `<span style="color:var(--muted)">—</span>`;
+    return `<tr><td>${escapeHtml(formatDate(item.timestamp))}</td><td><strong>${escapeHtml(item.service_name)}</strong></td><td><code>${escapeHtml(item.method)} ${escapeHtml(item.path)}</code></td><td><code>${escapeHtml(item.client_ip)}</code></td><td>${escapeHtml(identity)}</td><td><span class="status-badge ${type === "success" ? "success" : type === "blocked" ? "warning" : "error"}">${escapeHtml(item.outcome.replaceAll("_", " "))}</span></td><td>${item.status_code}</td><td>${Number(item.duration_ms).toFixed(1)} ms</td><td>${escapeHtml(formatBytes(item.bytes_in))} / ${escapeHtml(formatBytes(item.bytes_out))}</td><td>${tokenDisplay}</td></tr>`;
+  }).join("") : `<tr><td colspan="10"><div class="empty-state"><strong>${state.proxyHistory.length ? "No matching usage" : "No usage recorded"}</strong><span>${state.proxyHistory.length ? "Change the history filters." : "Proxy requests will appear here."}</span></div></td></tr>`;
 }
 
 async function loadProxyObservability() {
@@ -755,7 +783,7 @@ async function loadProxyObservability() {
     state.proxyHistory = history;
     renderProxyHistory();
   } catch (error) {
-    $("#proxy-history-body").innerHTML = `<tr><td colspan="9"><div class="empty-state error-state"><strong>Usage data unavailable</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+    $("#proxy-history-body").innerHTML = `<tr><td colspan="10"><div class="empty-state error-state"><strong>Usage data unavailable</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
   }
 }
 

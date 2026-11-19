@@ -32,7 +32,7 @@ The architecture strictly separates the **CentralWatch Management Platform** (`:
 
 ## 1. System Port & Service Architecture
 
-CentralWatch runs 13 integrated services on a dedicated Docker network (`centralwatch-network`):
+CentralWatch runs 14 integrated services on a dedicated Docker network (`centralwatch-network`):
 
 | Service | Container | Host Port | Purpose & Architectural Role |
 | :--- | :--- | :--- | :--- |
@@ -157,7 +157,7 @@ CentralWatch has been upgraded from a basic telemetry sample into an enterprise-
 * **Cryptographic Random Tokens (`cw_role_<random>`):** High-entropy 24-byte URL-safe base64 strings generated via Python `secrets`, eliminating human-predictable identifiers.
 * **Dynamic Role Lookup & Zero-Trust RBAC:** Dynamic token resolution via SHA-256 digests (`get_role_by_token_hash`). Roles without permissions for a service (e.g. `non_chat_role`) return HTTP 403 with `outcome: blocked_role` in the audit log.
 * **Password-Protected Token Reveal:** Token secrets are masked in the UI; revealing them requires entering the operator password (`Password123!`), logged in the audit trail.
-* **Per-Service Budgets & Cost Tracking:** Automatic tracking of prompt and completion tokens for LLM providers (Gemini, Claude, OpenAI) with cost estimation per caller.
+* **Per-Service Budgets & Cost Tracking:** Automatic tracking of prompt and completion tokens for LLM providers (Gemini, Claude, OpenAI) with cost estimation per caller, displayed in real-time across the Platform Console (`:8080/#proxy`) metrics grid, traffic breakdown, and API usage tables.
 * **Token Expiry & Schedules:** Proxy tokens enforce expiration (`token_expires_at`) with a single-click rotation endpoint.
 * **Secret Redaction:** Outbound logs and audit records automatically scrub sensitive headers (`Authorization`, `x-goog-api-key`, `api-key`, `cookie`).
 * **Resilience Mechanisms:** Sliding TTL response caching for idempotent GETs, exponential retries on upstream 5xx errors, and an in-memory circuit breaker that trips after 5 consecutive failures.
@@ -199,7 +199,7 @@ CentralWatch has been upgraded from a basic telemetry sample into an enterprise-
 # Display all available developer commands
 make help
 
-# Build and start all 12 services
+# Build and start all 14 services
 make up
 
 # Verify end-to-end health across all services
@@ -234,7 +234,7 @@ docker compose up -d --build
 * **Demo API Swagger Documentation:** `http://localhost:8000/docs`
 * **Inventory Microservice API:** `http://localhost:8001/docs`
 * **Grafana Dashboards:** `http://localhost:3000` (User: `admin`, Password: `admin`)
-* **Prometheus Targets & Alerts:** `http://localhost:9090`
+* **Prometheus Targets & Alerts:** `http://localhost:9091` (container internal: `:9090`)
 * **Alertmanager UI:** `http://localhost:9093`
 * **Loki Log Aggregator:** `http://localhost:3100`
 * **Tempo Tracing Engine:** `http://localhost:3200`

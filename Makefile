@@ -1,4 +1,4 @@
-.PHONY: up up-aws down restart build logs health status traffic clean ps help
+.PHONY: up up-aws down restart build logs health status traffic clean ps test help
 
 # Default target
 .DEFAULT_GOAL := help
@@ -18,6 +18,7 @@ help:
 	@echo "  status      Show container status (alias: ps)"
 	@echo "  ps          Alias for status"
 	@echo "  traffic     Show recent traffic-generator logs"
+	@echo "  test        Run the automated test suite"
 	@echo "  shell-<svc> Open a shell inside a running service  e.g. make shell-api"
 	@echo "  clean       Stop stack and remove all volumes"
 	@echo ""
@@ -56,6 +57,11 @@ logs-%:
 ## health: Run the healthcheck script
 health:
 	@bash scripts/healthcheck.sh
+
+## test: Run automated test suite
+test:
+	@echo "Running test suite inside demo-app..."
+	@docker compose exec demo-app pytest
 
 ## status: Show container status
 status:

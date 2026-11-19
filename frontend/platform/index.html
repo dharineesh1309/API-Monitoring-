@@ -95,7 +95,7 @@
           <div class="layout-grid proxy-grid">
             <article class="card span-2">
               <div class="card-header stack-mobile"><div><h2>Managed services</h2><p>The upstream key is hidden. Callers receive a separate proxy token whose hash is stored by CentralWatch.</p></div><input class="search-input" id="proxy-search" type="search" placeholder="Search services" aria-label="Search proxy services"></div>
-              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Base URL</th><th>Allowed IPs</th><th>Role</th><th>Proxy token</th><th>Auth / key</th><th></th></tr></thead><tbody id="service-table-body"><tr><td colspan="7"><div class="loading-state"><i></i>Loading registry…</div></td></tr></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Base URL</th><th>Allowed IPs</th><th>Role</th><th>Proxy token</th><th>Auth / key</th><th>Budget limit</th><th></th></tr></thead><tbody id="service-table-body"><tr><td colspan="8"><div class="loading-state"><i></i>Loading registry…</div></td></tr></tbody></table></div>
             </article>
             <article class="card">
               <div class="card-header"><div><h2>Add service</h2><p>Existing service IDs are replaced by the backend.</p></div></div>
@@ -107,6 +107,7 @@
                 <label>Access role<select id="proxy-service-role" name="role_name" required><option value="">Select a role</option></select><small>The role limits which services and HTTP methods this token may use.</small></label>
                 <label>Upstream authentication<select name="auth_type"><option value="bearer">Authorization: Bearer</option><option value="x-goog-api-key">Gemini x-goog-api-key</option></select></label>
                 <label>Upstream timeout (seconds)<input name="timeout_seconds" type="number" min="1" max="120" step="1" value="10" required></label>
+                <label>Monthly budget limit (USD)<input name="monthly_budget_usd" type="number" min="0" step="1" value="100" placeholder="100"><small>Per-service budget for cost tracking and alerts.</small></label>
                 <button class="button primary" id="submit-proxy" type="submit">Save service</button><p class="form-message" id="proxy-form-message" role="status"></p>
               </form>
               <div class="token-result" id="proxy-access-token-result" hidden><strong>Copy this proxy token now</strong><p>The real upstream API key remains in CentralWatch. Only this token's hash is stored.</p><div><code id="proxy-access-token"></code><button class="button secondary compact" id="copy-proxy-access-token" type="button">Copy token</button></div></div>
@@ -121,6 +122,8 @@
             <article class="summary-card"><span>Server errors</span><strong id="proxy-error-count">0</strong><small>Upstream 5xx or failures</small></article>
             <article class="summary-card"><span>Average latency</span><strong id="proxy-average-latency">0 ms</strong><small>All recorded requests</small></article>
             <article class="summary-card"><span>P95 latency</span><strong id="proxy-p95-latency">0 ms</strong><small>95th percentile</small></article>
+            <article class="summary-card"><span>LLM Tokens</span><strong id="proxy-total-tokens">0</strong><small>Prompt & completion</small></article>
+            <article class="summary-card"><span>Est. LLM Cost</span><strong id="proxy-total-cost">$0.0000</strong><small>Across all providers</small></article>
           </div>
 
           <div class="layout-grid proxy-access-grid">
@@ -137,13 +140,13 @@
               <div class="table-wrap"><table><thead><tr><th>Role</th><th>Services</th><th>Methods</th><th>Assigned APIs</th><th>Proxy Token</th></tr></thead><tbody id="proxy-roles-body"><tr><td colspan="5"><div class="loading-state"><i></i>Loading roles…</div></td></tr></tbody></table></div>
             </article>
             <article class="card span-2">
-              <div class="card-header"><div><h2>Traffic breakdown</h2><p>Request volume, outcomes, and latency by upstream service.</p></div></div>
-              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Requests</th><th>Successful</th><th>Blocked</th><th>Errors</th><th>Avg latency</th></tr></thead><tbody id="proxy-service-metrics-body"><tr><td colspan="6"><div class="empty-state compact"><strong>No proxy traffic</strong><span>Metrics appear after the first request.</span></div></td></tr></tbody></table></div>
+              <div class="card-header"><div><h2>Traffic breakdown & cost</h2><p>Request volume, outcomes, token usage, and cost by upstream service.</p></div></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Requests</th><th>Successful</th><th>Blocked</th><th>Errors</th><th>Avg latency</th><th>Tokens used</th><th>Cost / Budget</th></tr></thead><tbody id="proxy-service-metrics-body"><tr><td colspan="8"><div class="empty-state compact"><strong>No proxy traffic</strong><span>Metrics appear after the first request.</span></div></td></tr></tbody></table></div>
               <dl class="detail-list proxy-breakdown"><div><dt>Methods</dt><dd id="proxy-method-metrics">None</dd></div><div><dt>Status codes</dt><dd id="proxy-status-metrics">None</dd></div><div><dt>Request bytes</dt><dd id="proxy-bytes-in">0 B</dd></div><div><dt>Response bytes</dt><dd id="proxy-bytes-out">0 B</dd></div><div><dt>Unique client IPs</dt><dd id="proxy-unique-ips">0</dd></div><div><dt>Authenticated proxy tokens</dt><dd id="proxy-token-count">0</dd></div></dl>
             </article>
             <article class="card span-3 proxy-history-card">
               <div class="card-header stack-mobile"><div><h2>API usage history</h2><p>Recent proxy calls. Secrets, bodies, and query values are never recorded.</p></div><div class="filter-row"><input class="search-input" id="proxy-history-search" type="search" placeholder="Search service, role, or IP"><select id="proxy-history-outcome" aria-label="Filter usage outcome"><option value="">All outcomes</option><option value="success">Successful</option><option value="blocked">Blocked</option><option value="error">Errors</option></select></div></div>
-              <div class="table-wrap"><table><thead><tr><th>Time</th><th>Service</th><th>Request</th><th>Client IP</th><th>Role / token</th><th>Outcome</th><th>Status</th><th>Latency</th><th>Traffic</th></tr></thead><tbody id="proxy-history-body"><tr><td colspan="9"><div class="empty-state"><strong>No usage recorded</strong><span>Proxy requests will appear here.</span></div></td></tr></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Time</th><th>Service</th><th>Request</th><th>Client IP</th><th>Role / token</th><th>Outcome</th><th>Status</th><th>Latency</th><th>Traffic</th><th>Tokens & Cost</th></tr></thead><tbody id="proxy-history-body"><tr><td colspan="10"><div class="empty-state"><strong>No usage recorded</strong><span>Proxy requests will appear here.</span></div></td></tr></tbody></table></div>
             </article>
             <article class="card span-3" id="quarantined-ips-card">
               <div class="card-header stack-mobile">
