@@ -331,3 +331,8 @@ demo-app/.pytest_cache/
 
 # Optional local copies of build downloads (demo-app/vendor/README.md)
 demo-app/vendor/*.jar
+
+# Personal files kept in the archive locally (theses, proposals, screenshots); never committed
+archive/docs/
+archive/review docs/
+archive/*.docx

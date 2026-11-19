@@ -14,7 +14,7 @@
 #   * No LocalStack. boto3 uses the real AWS regional endpoints.
 #   * AWS_PROVISION_RESOURCES=false — the app VALIDATES that every required
 #     resource exists and fails fast if anything is missing. Pre-create the
-#     resources listed in AWS_DEPLOYMENT.md (terraform/cloudformation or the
+#     resources listed in archive/AWS_DEPLOYMENT.md (terraform/cloudformation or the
 #     AWS console) and grant the least-privilege IAM policy from that doc.
 #   * AWS_ENDPOINT_URL is empty — the standard AWS SDK default endpoints.
 #   * Credentials come from the standard AWS credential chain (env vars,

@@ -130,8 +130,11 @@ API-Monitoring-/
 ├── Makefile                        # Command-line developer workflow orchestration
 ├── docker-compose.yml              # LocalStack development multi-container composition
 ├── docker-compose.aws.yml          # Production AWS multi-container composition
-├── progress.md                     # Detailed engineering tracking of all 6 production upgrade phases
-└── ARCHITECTURE_AND_IMPROVEMENTS.md# Deep technical architecture documentation and specifications
+└── archive/                        # Earlier docs, guides, milestone notes and reports; nothing here is used by the build
+    ├── AWS_DEPLOYMENT.md           # Real-AWS resources, IAM policies and environment variables
+    ├── CENTRALWATCH_PROJECT_GUIDE.md # Full project guide, including the API reference
+    ├── ARCHITECTURE_AND_IMPROVEMENTS.md # Deep technical architecture documentation
+    └── progress.md, milestone*.md  # Engineering progress and milestone notes
 ```
 
 ---

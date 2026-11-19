@@ -93,7 +93,7 @@ class Settings(BaseSettings):
                 "AUTH_TOKEN_SECRET is required. Set it to any value for local/LocalStack "
                 "development (e.g. in docker-compose.yml or a local .env), and to a strong, "
                 "randomly-generated secret in real AWS deployments (via secrets management). "
-                "See .env.example and AWS_DEPLOYMENT.md."
+                "See .env.example and archive/AWS_DEPLOYMENT.md."
             )
         return value
 

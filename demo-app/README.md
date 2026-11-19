@@ -23,7 +23,7 @@ By default all AWS SDK calls (`boto3`) go to **LocalStack**, so the entire demo
 runs **fully offline** — no real AWS account, no cloud credentials. The same
 backend also runs against **real AWS**: leave `AWS_ENDPOINT_URL` empty, provide
 AWS credentials, pre-create the resources, and set `AWS_PROVISION_RESOURCES=false`
-(the app validates them at startup). See **[AWS_DEPLOYMENT.md](../AWS_DEPLOYMENT.md)**
+(the app validates them at startup). See **[archive/AWS_DEPLOYMENT.md](../archive/AWS_DEPLOYMENT.md)**
 for the complete guide.
 
 ---
@@ -51,7 +51,7 @@ Creation is **idempotent**: it runs at startup, on a periodic reconciliation loo
 > **Real AWS mode:** the auto-provisioning above runs when `AWS_PROVISION_RESOURCES=true`
 > (the LocalStack/dev default in `docker-compose.yml`). For real AWS set it to `false`
 > and pre-create the resources — the app validates them at startup and fails fast.
-> See [AWS_DEPLOYMENT.md](../AWS_DEPLOYMENT.md).
+> See [archive/AWS_DEPLOYMENT.md](../archive/AWS_DEPLOYMENT.md).
 
 ### Run locally (outside Docker)
 
