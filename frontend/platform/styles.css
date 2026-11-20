@@ -216,6 +216,14 @@ td code, code { font-family: var(--mono); font-size: 11px; }
 .form { display: grid; gap: 13px; }
 .form label, .upload-form label { display: grid; gap: 6px; color: var(--muted-strong); font-size: 11px; font-weight: 600; }
 .form label small { color: var(--muted); font-size: 10px; font-weight: 400; }
+.check-group { display: grid; gap: 6px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.check-group legend { margin-bottom: 6px; padding: 0; color: var(--muted-strong); font-size: 11px; font-weight: 600; }
+.check-group small { color: var(--muted); font-size: 10px; }
+.check-list { display: flex; flex-wrap: wrap; gap: 7px 14px; max-height: 132px; overflow: auto; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-subtle); }
+.form .check-group label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-strong); font-size: 11px; font-weight: 500; cursor: pointer; }
+.form .check-group label.is-locked { cursor: default; opacity: .7; }
+.check-empty { color: var(--muted); font-size: 11px; }
+.role-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 input, select, textarea { width: 100%; border: 1px solid var(--border-strong); border-radius: 7px; color: var(--text); background: var(--surface-elevated); outline: none; transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease; }
 input, select { height: 39px; padding: 0 11px; }
 textarea { min-height: 84px; padding: 9px 10px; resize: vertical; }

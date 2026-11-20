@@ -33,6 +33,10 @@ CentralWatch to watch.
 - **Applications get a proxy token instead of the key.** Only the token's SHA-256 hash is stored. Tokens
   expire after 90 days and can be rotated. An application calls
   `http://<host>:8000/centralwatch/proxy/<service>/<path>` with the header `X-CentralWatch-Proxy-Token`.
+- **Roles and services are many-to-many.** A role (with its own token and allowed HTTP methods) can reach
+  any number of services, and a service can be used by any number of roles; both forms on the API proxy
+  page take several picks. A role token works on every service its role reaches; a service's own token
+  may do on that service whatever any of its roles allows.
 - **Every call passes the same checks, in this order:** quarantined IP → IP allowlist → token and expiry
   → role (allowed services and HTTP methods) → rate limit (60-second sliding window, 120 requests per
   minute by default) → circuit breaker (opens for 15 s after 5 upstream failures) → 15-second cache for
@@ -276,7 +280,7 @@ pip install -r demo-app/requirements.txt -e ./centralwatch-security pytest
 make test
 ```
 
-`make test` runs the plugin tests (53) and the demo-app tests (21) on your machine. They use fake AWS
+`make test` runs the plugin tests (54) and the demo-app tests (21) on your machine. They use fake AWS
 clients and a fake database, so no AWS account is needed.
 
 GitHub Actions runs both suites and builds all three images on every push and pull request

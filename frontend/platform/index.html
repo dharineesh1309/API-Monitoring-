@@ -99,7 +99,7 @@
           <div class="layout-grid proxy-grid">
             <article class="card span-2">
               <div class="card-header stack-mobile"><div><h2>Managed services</h2><p>The upstream key is hidden. Callers receive a separate proxy token whose hash is stored by CentralWatch.</p></div><input class="search-input" id="proxy-search" type="search" placeholder="Search services" aria-label="Search proxy services"></div>
-              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Base URL</th><th>Allowed IPs</th><th>Role</th><th>Proxy token</th><th>Auth / key</th><th>Budget limit</th><th></th></tr></thead><tbody id="service-table-body"><tr><td colspan="8"><div class="loading-state"><i></i>Loading registry…</div></td></tr></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Service</th><th>Base URL</th><th>Allowed IPs</th><th>Roles</th><th>Proxy token</th><th>Auth / key</th><th>Budget limit</th><th></th></tr></thead><tbody id="service-table-body"><tr><td colspan="8"><div class="loading-state"><i></i>Loading registry…</div></td></tr></tbody></table></div>
             </article>
             <article class="card">
               <div class="card-header"><div><h2>Add service</h2><p>Existing service IDs are replaced by the backend.</p></div></div>
@@ -108,7 +108,7 @@
                 <label>Target base URL<input id="input-url" name="base_url" type="url" required placeholder="https://api.example.com/v1"></label>
                 <label>Secret API key<input id="input-key" name="api_key" type="password" required autocomplete="off" placeholder="Stored by CentralWatch"></label>
                 <label>Allowed IPs or CIDRs<input id="input-ips" name="allowed_ips" required value="127.0.0.1, 10.0.0.0/8"></label>
-                <label>Access role<select id="proxy-service-role" name="role_name" required><option value="">Select a role</option></select><small>The role limits which services and HTTP methods this token may use.</small></label>
+                <fieldset class="check-group"><legend>Roles that can use this service</legend><div class="check-list" id="proxy-service-role-list"><span class="check-empty">Loading roles…</span></div><small>Pick one or more. Roles open to every service (*) always apply. This service's own token may do what any of these roles allows on it.</small></fieldset>
                 <label>Upstream authentication<select name="auth_type"><option value="bearer">Authorization: Bearer</option><option value="x-goog-api-key">Gemini x-goog-api-key</option></select></label>
                 <label>Upstream timeout (seconds)<input name="timeout_seconds" type="number" min="1" max="120" step="1" value="10" required></label>
                 <label>Monthly budget limit (USD)<input name="monthly_budget_usd" type="number" min="0" step="1" value="100" placeholder="100"><small>Per-service budget for cost tracking and alerts.</small></label>
@@ -135,13 +135,13 @@
               <div class="card-header"><div><h2>Access roles</h2><p>Restrict each proxy token to selected services and HTTP methods.</p></div></div>
               <form class="form" id="proxy-role-form">
                 <label>Role name<input name="role_name" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" placeholder="reporting_reader"></label>
-                <label>Allowed services<input name="allowed_services" required placeholder="test_service or *"><small>Comma-separated service IDs. Use * for every service.</small></label>
+                <fieldset class="check-group"><legend>Allowed services</legend><label class="check-all"><input class="finding-checkbox" id="role-all-services" type="checkbox">All services (*)</label><div class="check-list" id="proxy-role-service-list"><span class="check-empty">Loading services…</span></div><small>Pick one or more. A service can belong to many roles.</small></fieldset>
                 <label>Allowed methods<input name="allowed_methods" required value="GET" placeholder="GET, POST"></label>
                 <button class="button primary" id="save-proxy-role" type="submit">Save role</button><p class="form-message" id="proxy-role-message" role="status"></p>
               </form>
               <div class="token-result" id="role-access-token-result" hidden style="margin-top:12px;"><strong>Copy this proxy token now</strong><p>The role access token has been generated. Callers can use this token for allowed services.</p><div><code id="role-access-token"></code><button class="button secondary compact" id="copy-role-access-token" type="button">Copy token</button></div></div>
               <div class="section-divider"></div>
-              <div class="table-wrap"><table><thead><tr><th>Role</th><th>Services</th><th>Methods</th><th>Assigned APIs</th><th>Proxy Token</th></tr></thead><tbody id="proxy-roles-body"><tr><td colspan="5"><div class="loading-state"><i></i>Loading roles…</div></td></tr></tbody></table></div>
+              <div class="table-wrap"><table><thead><tr><th>Role</th><th>Services</th><th>Methods</th><th>Services reached</th><th>Proxy Token</th></tr></thead><tbody id="proxy-roles-body"><tr><td colspan="5"><div class="loading-state"><i></i>Loading roles…</div></td></tr></tbody></table></div>
             </article>
             <article class="card span-2">
               <div class="card-header"><div><h2>Traffic breakdown & cost</h2><p>Request volume, outcomes, token usage, and cost by upstream service.</p></div></div>

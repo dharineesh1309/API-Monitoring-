@@ -511,6 +511,60 @@ def test_configured_service_token_and_role_are_both_enforced(client, monkeypatch
     ).status_code == 200
 
 
+def test_roles_and_services_are_many_to_many(client, proxy_store):
+    class FakeAsyncClient:
+        async def request(self, **kwargs):
+            return httpx.Response(200, json={"ok": True}, request=httpx.Request(kwargs["method"], kwargs["url"]))
+
+    client.app.state.centralwatch_proxy_http_client = FakeAsyncClient()
+    service = {"base_url": "https://upstream.example", "api_key": "managed-secret", "allowed_ips": ["127.0.0.1"]}
+
+    # One role reaching two services, created before either service exists.
+    reader = client.post("/centralwatch/proxy/roles", json={
+        "role_name": "reports_reader", "allowed_services": ["reports_api", "billing_api"], "allowed_methods": ["GET"],
+    })
+    writer = client.post("/centralwatch/proxy/roles", json={
+        "role_name": "reports_writer", "allowed_services": ["billing_api"], "allowed_methods": ["POST"],
+    })
+    assert reader.status_code == writer.status_code == 201
+    reader_token, writer_token = reader.json()["access_token"], writer.json()["access_token"]
+
+    # One service used by several roles, picked from the service form.
+    saved = client.post("/centralwatch/proxy/keys", json={**service, "service_name": "reports_api",
+                                                          "role_names": ["reports_reader", "reports_writer"]})
+    client.post("/centralwatch/proxy/keys", json={**service, "service_name": "billing_api", "role_name": "reports_reader"})
+    assert saved.status_code == 201 and saved.json()["role_name"] == "reports_reader"
+    assert "reports_api" in proxy_store.roles["reports_writer"]["allowed_services"]
+
+    keys = {item["service_name"]: item for item in client.get("/centralwatch/proxy/keys").json()}
+    assert set(keys["reports_api"]["role_names"]) == {"reports_reader", "reports_writer", "proxy_reader"}  # proxy_reader is "*"
+    assert set(keys["billing_api"]["role_names"]) == {"reports_reader", "reports_writer", "proxy_reader"}
+    roles = {item["role_name"]: item for item in client.get("/centralwatch/proxy/roles").json()}
+    assert roles["reports_reader"]["assigned_services"] == 2 and roles["reports_writer"]["assigned_services"] == 2
+
+    def call(method, name, token):
+        return client.request(method, f"/centralwatch/proxy/{name}/data", headers={"X-CentralWatch-Proxy-Token": token}).status_code
+
+    # Each role token works on every service its role reaches, with that role's methods only.
+    assert call("GET", "reports_api", reader_token) == 200 and call("GET", "billing_api", reader_token) == 200
+    assert call("POST", "reports_api", writer_token) == 200 and call("POST", "billing_api", writer_token) == 200
+    assert call("POST", "reports_api", reader_token) == 403 and call("GET", "reports_api", writer_token) == 403
+    # The service's own token may do what any of its roles allows on it, and nothing on other services.
+    own = saved.json()["access_token"]
+    assert call("GET", "reports_api", own) == 200 and call("POST", "reports_api", own) == 200
+    assert call("DELETE", "reports_api", own) == 403 and call("GET", "billing_api", own) == 403
+
+    # Saving the service with fewer roles unlinks the others; sending only role_name never unlinks.
+    client.post("/centralwatch/proxy/keys", json={**service, "service_name": "reports_api", "role_names": ["reports_reader"]})
+    assert "reports_api" not in proxy_store.roles["reports_writer"]["allowed_services"]
+    assert call("POST", "reports_api", writer_token) == 403
+    client.post("/centralwatch/proxy/keys", json={**service, "service_name": "billing_api", "role_name": "reports_reader"})
+    assert "billing_api" in proxy_store.roles["reports_writer"]["allowed_services"]
+
+    assert client.post("/centralwatch/proxy/keys", json={**service, "service_name": "x_api", "role_names": ["no_such_role"]}).status_code == 404
+    assert client.post("/centralwatch/proxy/keys", json={**service, "service_name": "x_api", "role_names": []}).status_code == 422
+
+
 def test_proxy_history_and_metrics_capture_success_and_blocks(client, monkeypatch):
     access_token = "cw_proxy_metrics_test"
     store = client.app.state.centralwatch_proxy_store

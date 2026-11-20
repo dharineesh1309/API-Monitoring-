@@ -514,9 +514,13 @@ async function loadServices() {
   } finally { setBusy(refresh, false); }
 }
 
+const serviceRoles = (service) => (service.role_names?.length ? service.role_names : [service.role_name]);
+const isOpenRole = (role) => role.allowed_services.includes("*");
+
 function renderServices() {
+  renderRoleServiceChoices();
   const query = $("#proxy-search").value.trim().toLowerCase();
-  const services = state.services.filter((service) => [service.service_name, service.base_url, ...service.allowed_ips].join(" ").toLowerCase().includes(query));
+  const services = state.services.filter((service) => [service.service_name, service.base_url, ...service.allowed_ips, ...serviceRoles(service)].join(" ").toLowerCase().includes(query));
   if (!services.length) {
     $("#service-table-body").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>${state.services.length ? "No matching services" : "No services configured"}</strong><span>${state.services.length ? "Try a different search." : "Add the first upstream service using the form."}</span></div></td></tr>`;
     return;
@@ -526,7 +530,7 @@ function renderServices() {
       <td><strong>${escapeHtml(service.service_name)}</strong></td>
       <td><code>${escapeHtml(service.base_url)}</code></td>
       <td>${escapeHtml(service.allowed_ips.join(", "))}</td>
-      <td><span class="status-badge neutral">${escapeHtml(service.role_name)}</span></td>
+      <td><div class="role-badges">${serviceRoles(service).map((name) => `<span class="status-badge neutral">${escapeHtml(name)}</span>`).join("")}</div></td>
       <td>
         <div style="display:inline-flex;align-items:center;gap:6px;">
           <code>${escapeHtml(service.token_hint)}</code>
@@ -552,13 +556,14 @@ async function handleProxySubmit(event) {
   const payload = {
     service_name: data.get("service_name").trim(), base_url: data.get("base_url").trim(), api_key: data.get("api_key"),
     allowed_ips: data.get("allowed_ips").split(",").map((value) => value.trim()).filter(Boolean),
-    role_name: data.get("role_name"),
+    role_names: selectedServiceRoles(),
     auth_type: data.get("auth_type"),
     timeout_seconds: Number(data.get("timeout_seconds")),
     monthly_budget_usd: parseFloat(data.get("monthly_budget_usd") || "100.0"),
   };
   const button = $("#submit-proxy");
   const message = $("#proxy-form-message");
+  if (!payload.role_names.length) { setMessage(message, "Pick at least one role that can use this service.", true); return; }
   setBusy(button, true, "Saving…");
   setMessage(message, "");
   try {
@@ -570,7 +575,7 @@ async function handleProxySubmit(event) {
     setMessage(message, `${payload.service_name} is ready.`);
     recordActivity("Proxy saved", payload.service_name);
     showToast(`Saved proxy service ${payload.service_name}`);
-    await loadServices();
+    await Promise.all([loadServices(), loadProxyRoles()]);  // saving a service can link or unlink roles
   } catch (error) { setMessage(message, error.message, true); }
   finally { setBusy(button, false); }
 }
@@ -604,11 +609,62 @@ function renderProxyRoles() {
         )
         .join("")
     : `<tr><td colspan="5"><div class="empty-state compact"><strong>No roles configured</strong><span>Create the first proxy role above.</span></div></td></tr>`;
-  const select = $("#proxy-service-role");
-  const selected = select.value;
-  select.innerHTML = `<option value="">Select a role</option>${state.proxyRoles.map((role) => `<option value="${escapeHtml(role.role_name)}">${escapeHtml(role.role_name)}</option>`).join("")}`;
-  if (state.proxyRoles.some((role) => role.role_name === selected)) select.value = selected;
-  else if (state.proxyRoles.some((role) => role.role_name === "proxy_reader")) select.value = "proxy_reader";
+  renderServiceRoleChoices();
+}
+
+// Roles and services are many-to-many: the service form picks any number of roles, the role form any number of services.
+function renderServiceRoleChoices() {
+  const list = $("#proxy-service-role-list");
+  if (!list) return;
+  const checked = new Set($$("input:checked", list).map((input) => input.value));
+  list.innerHTML = state.proxyRoles?.length
+    ? state.proxyRoles.map((role) => {
+        const open = isOpenRole(role);
+        return `<label class="${open ? "is-locked" : ""}"><input class="finding-checkbox" type="checkbox" value="${escapeHtml(role.role_name)}"${open || checked.has(role.role_name) ? " checked" : ""}${open ? " disabled" : ""}>${escapeHtml(role.role_name)}${open ? " (all services)" : ""}</label>`;
+      }).join("")
+    : `<span class="check-empty">No roles yet. Create one under Access roles.</span>`;
+}
+
+function selectedServiceRoles() {
+  const inputs = $$("#proxy-service-role-list input");
+  return [...inputs.filter((input) => input.checked && !input.disabled), ...inputs.filter((input) => input.disabled)].map((input) => input.value);
+}
+
+function renderRoleServiceChoices(extra = []) {
+  const list = $("#proxy-role-service-list");
+  if (!list) return;
+  const checked = new Set([...$$("input:checked", list).map((input) => input.value), ...extra]);
+  const all = $("#role-all-services")?.checked;
+  const names = [...new Set([...(state.services || []).map((service) => service.service_name), ...checked])];
+  list.innerHTML = names.length
+    ? names.map((name) => {
+        const known = (state.services || []).some((service) => service.service_name === name);
+        return `<label><input class="finding-checkbox" type="checkbox" value="${escapeHtml(name)}"${checked.has(name) ? " checked" : ""}${all ? " disabled" : ""}>${escapeHtml(name)}${known ? "" : " (not added yet)"}</label>`;
+      }).join("")
+    : `<span class="check-empty">No services yet. Add one under Add service.</span>`;
+}
+
+function toggleAllRoleServices() {
+  const all = $("#role-all-services").checked;
+  $$("#proxy-role-service-list input").forEach((input) => { input.disabled = all; });
+}
+
+// Typing the ID of an existing service or role shows its current links, so a save edits them instead of guessing.
+function prefillServiceRoles() {
+  const service = (state.services || []).find((item) => item.service_name === $("#input-service").value.trim());
+  if (!service) return;
+  const linked = new Set(serviceRoles(service));
+  $$("#proxy-service-role-list input:not(:disabled)").forEach((input) => { input.checked = linked.has(input.value); });
+}
+
+function prefillRole(event) {
+  const role = (state.proxyRoles || []).find((item) => item.role_name === event.currentTarget.value.trim());
+  if (!role) return;
+  const all = isOpenRole(role);
+  $("#role-all-services").checked = all;
+  $$("#proxy-role-service-list input").forEach((input) => { input.checked = false; });
+  renderRoleServiceChoices(all ? [] : role.allowed_services);
+  $("#proxy-role-form").elements.allowed_methods.value = role.allowed_methods.join(", ");
 }
 
 async function handleProxyRoleSubmit(event) {
@@ -618,11 +674,12 @@ async function handleProxyRoleSubmit(event) {
   const data = new FormData(form);
   const payload = {
     role_name: data.get("role_name").trim(),
-    allowed_services: data.get("allowed_services").split(",").map((value) => value.trim()).filter(Boolean),
+    allowed_services: $("#role-all-services").checked ? ["*"] : $$("#proxy-role-service-list input:checked").map((input) => input.value),
     allowed_methods: data.get("allowed_methods").split(",").map((value) => value.trim().toUpperCase()).filter(Boolean),
   };
   const button = $("#save-proxy-role");
   const message = $("#proxy-role-message");
+  if (!payload.allowed_services.length) { setMessage(message, "Pick at least one service, or All services.", true); return; }
   setBusy(button, true, "Saving…");
   setMessage(message, "");
   try {
@@ -631,6 +688,7 @@ async function handleProxyRoleSubmit(event) {
     recordActivity("Proxy role saved", payload.role_name);
     showToast(`Saved proxy role ${payload.role_name}`);
     form.reset();
+    renderRoleServiceChoices();
     if (result.access_token) {
       const box = $("#role-access-token-result");
       const code = $("#role-access-token");
@@ -640,7 +698,7 @@ async function handleProxyRoleSubmit(event) {
         state.lastRoleAccessToken = result.access_token;
       }
     }
-    await loadProxyRoles();
+    await Promise.all([loadProxyRoles(), loadServices()]);  // the services table lists each service's roles
   } catch (error) { setMessage(message, error.message, true); }
   finally { setBusy(button, false); }
 }
@@ -2157,6 +2215,9 @@ function bindEvents() {
   on("#proxy-search", "input", renderServices);
   on("#proxy-form", "submit", handleProxySubmit);
   on("#proxy-role-form", "submit", handleProxyRoleSubmit);
+  on("#role-all-services", "change", toggleAllRoleServices);
+  on("#input-service", "change", prefillServiceRoles);
+  on('#proxy-role-form input[name="role_name"]', "change", prefillRole);
   on("#copy-proxy-access-token", "click", () => {
     if (state.lastProxyAccessToken) copyText(state.lastProxyAccessToken, "Proxy token copied");
   });

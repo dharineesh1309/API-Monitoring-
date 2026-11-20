@@ -286,6 +286,9 @@ class ServiceConfig(BaseModel):
         max_length=64,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$",
     )
+    # Every role that may use this service (many-to-many). When sent, it replaces the service's role links;
+    # older callers that send only role_name just add that one link.
+    role_names: Optional[list[str]] = Field(default=None, min_length=1, max_length=100)
     auth_type: Literal["bearer", "x-goog-api-key"] = "bearer"
     timeout_seconds: float = Field(default=10.0, ge=1.0, le=120.0)
     rate_limit_rpm: int = Field(default=120, ge=1, le=10000)
@@ -295,6 +298,24 @@ class ServiceConfig(BaseModel):
     @classmethod
     def strip_text_fields(cls, value: Any) -> Any:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("role_names")
+    @classmethod
+    def validate_role_names(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        normalized = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+        invalid = [value for value in normalized if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", value)]
+        if invalid:
+            raise ValueError(f"Invalid role name: {', '.join(invalid)}")
+        if not normalized:
+            raise ValueError("Select at least one role")
+        return normalized
+
+    @property
+    def roles(self) -> list[str]:
+        """The roles to link, first one being the service's primary role."""
+        return self.role_names or [self.role_name]
 
     @field_validator("base_url")
     @classmethod
@@ -523,6 +544,32 @@ def _role_allows(role: dict[str, Any], service_name: str, method: str) -> bool:
     return ("*" in services or service_name in services) and method.upper() in methods
 
 
+def _roles_for_service(service_name: str, roles: list[dict[str, Any]]) -> list[str]:
+    """Roles that can use the service. Roles and services are many-to-many: each role's allowed_services
+    is the one place the link is stored, and "*" links a role to every service."""
+    return [role["role_name"] for role in roles if "*" in role["allowed_services"] or service_name in role["allowed_services"]]
+
+
+async def _link_service_roles(store, service_name: str, selected: list[str], roles: list[dict[str, Any]], exclusive: bool) -> list[str]:
+    """Add the service to every selected role; with exclusive=True also take it off the roles not selected.
+    Roles open to every service ("*") are left alone. Returns the roles that changed."""
+    # ponytail: one write per changed role, not one transaction; fine for admin edits on a handful of roles.
+    changed = []
+    for role in roles:
+        services = role["allowed_services"]
+        if "*" in services:
+            continue
+        if role["role_name"] in selected and service_name not in services:
+            role["allowed_services"] = [*services, service_name]
+        elif exclusive and role["role_name"] not in selected and service_name in services:
+            role["allowed_services"] = [name for name in services if name != service_name]
+        else:
+            continue
+        await _database_call(store.upsert_role(role), "link role to service")
+        changed.append(role["role_name"])
+    return changed
+
+
 def _record_proxy_usage(
     request: Request,
     *,
@@ -700,7 +747,9 @@ async def proxy_health(request: Request):
 async def list_keys(request: Request, authorization: str = Header(default="")):
     """List managed services without exposing their secret API keys (administrators only)."""
     _require_admin(request, authorization)
-    services = await _database_call(_proxy_store(request).list_services(), "list services")
+    store = _proxy_store(request)
+    services = await _database_call(store.list_services(), "list services")
+    roles = await _database_call(store.list_roles(), "list roles for services")
     return [
         {
             "service_name": config["service_name"],
@@ -709,6 +758,7 @@ async def list_keys(request: Request, authorization: str = Header(default="")):
             "api_key": _mask_api_key(config["api_key"]),
             "api_key_secondary_configured": bool(config.get("api_key_secondary")),
             "role_name": config.get("role_name", "proxy_reader"),
+            "role_names": _roles_for_service(config["service_name"], roles),
             "token_hint": config.get("token_hint", "unavailable"),
             "auth_type": config.get("auth_type", "bearer"),
             "timeout_seconds": config.get("timeout_seconds", 10.0),
@@ -730,9 +780,10 @@ async def add_key(
     """Add or replace a managed service configuration (Admin protected + SSRF checked)."""
     admin_user = _require_admin(request, authorization)
     store = _proxy_store(request)
-    role = await _database_call(store.get_role(config.role_name), "get role")
-    if role is None:
-        raise HTTPException(status_code=404, detail="Proxy role not found.")
+    roles = await _database_call(store.list_roles(), "list roles")
+    missing = [name for name in config.roles if name not in {role["role_name"] for role in roles}]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Proxy role not found: {', '.join(missing)}.")
 
     access_token = f"cw_proxy_{secrets.token_urlsafe(32)}"
     expires_at = datetime.now(timezone.utc) + timedelta(days=90)
@@ -744,7 +795,7 @@ async def add_key(
         "api_key": config.api_key.strip(),
         "api_key_secondary": config.api_key_secondary.strip() if config.api_key_secondary else None,
         "allowed_ips": config.allowed_ips,
-        "role_name": config.role_name,
+        "role_name": config.roles[0],
         "auth_type": config.auth_type,
         "timeout_seconds": config.timeout_seconds,
         "rate_limit_rpm": config.rate_limit_rpm,
@@ -755,6 +806,9 @@ async def add_key(
         "encrypted_token": encrypted_token,
     }
     await _database_call(store.upsert_service(service), "upsert service")
+    changed_roles = await _link_service_roles(
+        store, config.service_name, config.roles, roles, exclusive=config.role_names is not None,
+    )
 
     # Record tamper-evident audit log
     await store.record_audit_log(
@@ -765,7 +819,8 @@ async def add_key(
         service_name=config.service_name,
         details={
             "base_url": config.base_url,
-            "role_name": config.role_name,
+            "role_names": config.roles,
+            "roles_changed": changed_roles,
             "allowed_ips": config.allowed_ips,
             "rate_limit_rpm": config.rate_limit_rpm,
         },
@@ -776,7 +831,8 @@ async def add_key(
         "status": "success",
         "message": f"Service {config.service_name} configured successfully.",
         "service_name": config.service_name,
-        "role_name": config.role_name,
+        "role_name": config.roles[0],
+        "role_names": _roles_for_service(config.service_name, roles),
         "access_token": access_token,
         "token_hint": f"...{access_token[-6:]}",
         "expires_at": expires_at.isoformat(),
@@ -892,7 +948,7 @@ async def list_proxy_roles(request: Request, authorization: str = Header(default
                 "allowed_methods": role["allowed_methods"],
                 "token_hint": token_hint or "available",
                 "assigned_services": sum(
-                    service.get("role_name", "proxy_reader") == role["role_name"] for service in services
+                    role["role_name"] in _roles_for_service(service["service_name"], [role]) for service in services
                 ),
             }
         )
@@ -1272,6 +1328,7 @@ async def api_proxy(
     stored_token_hash = service_config.get("token_hash", "")
     supplied_token_hash = _token_digest(proxy_token) if proxy_token else ""
     token_valid = False
+    matched_role = None  # set when the caller used a role's token instead of the service's own token
     if supplied_token_hash:
         if stored_token_hash and hmac.compare_digest(stored_token_hash, supplied_token_hash):
             token_valid = True
@@ -1314,9 +1371,14 @@ async def api_proxy(
         )
         raise HTTPException(status_code=401, detail="The CentralWatch proxy token has expired. Rotate the token to resume access.")
 
-    # 3. Role Permission Verification
-    role = await _database_call(store.get_role(role_name), "get role for proxy")
-    if not role or not _role_allows(role, service_name, request.method):
+    # 3. Role Permission Verification. A role token gets what its role allows; the service's own token gets
+    # what any role linked to this service allows on it (roles and services are many-to-many).
+    if matched_role is not None:
+        candidates = [matched_role]
+    else:
+        candidates = await _database_call(store.list_roles(), "list roles for proxy")
+    role = next((item for item in candidates if _role_allows(item, service_name, request.method)), None)
+    if role is None:
         _record_proxy_usage(
             request,
             service_name=service_name,
@@ -1330,6 +1392,7 @@ async def api_proxy(
             role_name=role_name,
         )
         raise HTTPException(status_code=403, detail="The assigned proxy role does not permit this service or HTTP method.")
+    role_name = role["role_name"]
 
     # 4. Rate Limiting Check
     rate_limit = int(service_config.get("rate_limit_rpm", 120))
